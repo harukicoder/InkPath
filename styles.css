@@ -10,6 +10,34 @@
   --beginner: #1e73be;
   --intermediate: #8e44ad;
   --shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+  --word-saved-bg: #fff3cd;
+  --word-new-bg: transparent;
+  --word-new-outline: rgba(200, 16, 46, .28);
+  --word-hover-bg: #ffe4b5;
+  --hsk1: #2e8b57; --hsk2: #1e73be; --hsk3: #8e44ad;
+  --hsk4: #d2691e; --hsk5: #b8860b; --hsk6: #555;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15141a;
+    --surface: #1f1e26;
+    --ink: #ece8e2;
+    --muted: #9a9488;
+    --accent: #ff6b7a;
+    --accent-soft: #3a1f25;
+    --border: #2d2b36;
+    --newbie: #4fc08d;
+    --beginner: #6ab0f3;
+    --intermediate: #c488e0;
+    --shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+    --word-saved-bg: #3a2f14;
+    --word-new-bg: transparent;
+    --word-new-outline: rgba(255, 107, 122, .35);
+    --word-hover-bg: #403018;
+    --hsk1: #4fc08d; --hsk2: #6ab0f3; --hsk3: #c488e0;
+    --hsk4: #e6a163; --hsk5: #d4b85e; --hsk6: #999;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -198,3 +226,129 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 }
 .vocab-item .remove:hover { color: var(--accent); }
 .empty-state { text-align: center; color: var(--muted); padding: 60px 20px; }
+
+/* ---- Coverage meter on story cards ---- */
+.story-card .coverage { margin-top: 12px; }
+.coverage-bar {
+  height: 4px; background: var(--border); border-radius: 999px; overflow: hidden;
+}
+.coverage-bar > div {
+  height: 100%; background: linear-gradient(90deg, var(--newbie), var(--beginner));
+  border-radius: 999px; transition: width .3s ease;
+}
+.coverage-label {
+  font-size: 11px; color: var(--muted); margin-top: 4px; letter-spacing: .2px;
+}
+.story-card.done { border-color: var(--newbie); }
+.story-card .done-badge {
+  position: absolute; top: 10px; right: 10px;
+  background: var(--newbie); color: white;
+  font-size: 10px; padding: 2px 7px; border-radius: 999px; font-weight: 600;
+}
+.story-card { position: relative; }
+
+/* ---- Resume / Continue-reading card ---- */
+.resume-section { margin-bottom: 28px; }
+.resume-card {
+  background: linear-gradient(135deg, var(--accent-soft), var(--surface));
+  border: 1px solid var(--accent); border-radius: 14px;
+  padding: 18px 22px; cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.resume-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.resume-label {
+  font-size: 11px; font-weight: 700; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 4px;
+}
+.resume-title .hz { font-size: 22px; font-weight: 600; margin-right: 10px; }
+.resume-title .py { font-size: 13px; color: var(--muted); }
+.resume-progress {
+  margin-top: 10px; height: 6px; background: var(--border);
+  border-radius: 999px; overflow: hidden;
+}
+.resume-progress > div {
+  height: 100%; background: var(--accent); transition: width .3s ease;
+}
+.resume-meta { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+/* ---- Reader: coverage + word states ---- */
+.reader-coverage {
+  font-size: 12px; color: var(--muted);
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px;
+}
+.word.new {
+  background: var(--word-new-bg);
+  box-shadow: inset 0 -2px 0 var(--word-new-outline);
+}
+.word.saved { background: var(--word-saved-bg); box-shadow: none; }
+.word.unknown { opacity: .55; }
+.word:hover { background: var(--word-hover-bg); }
+
+/* Inline per-sentence translation chip */
+.en-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: 6px; padding: 2px 8px;
+  font-size: 10px; font-weight: 700; letter-spacing: .5px;
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 999px;
+  cursor: pointer; vertical-align: middle;
+  opacity: 0; transition: opacity .15s;
+}
+.sentence:hover .en-chip,
+.sentence.show-en .en-chip { opacity: 1; }
+.en-chip:hover { color: var(--accent); border-color: var(--accent); }
+.sentence.show-en .en-line { display: block !important; color: var(--ink); }
+
+/* ---- Popup: HSK badge + examples ---- */
+.popup-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.popup-hsk {
+  font-size: 10px; font-weight: 700; letter-spacing: .5px;
+  color: white; padding: 2px 8px; border-radius: 999px;
+}
+.popup-hsk.hsk-1 { background: var(--hsk1); }
+.popup-hsk.hsk-2 { background: var(--hsk2); }
+.popup-hsk.hsk-3 { background: var(--hsk3); }
+.popup-hsk.hsk-4 { background: var(--hsk4); }
+.popup-hsk.hsk-5 { background: var(--hsk5); }
+.popup-hsk.hsk-6 { background: var(--hsk6); }
+.popup-examples {
+  margin: 10px 0 12px; padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  max-height: 220px; overflow-y: auto;
+}
+.popup-examples .ex { margin-bottom: 10px; }
+.popup-examples .ex:last-child { margin-bottom: 0; }
+.popup-examples .ex-c { font-size: 15px; color: var(--ink); }
+.popup-examples .ex-p { font-size: 12px; color: var(--accent); margin-top: 1px; }
+.popup-examples .ex-e { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+/* ---- Vocab: filter pills + HSK badges ---- */
+.vocab-filters {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;
+}
+.vocab-filters .pill {
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border);
+  padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  font-size: 13px; display: inline-flex; align-items: center; gap: 6px;
+}
+.vocab-filters .pill:hover { border-color: var(--accent); color: var(--accent); }
+.vocab-filters .pill.active {
+  background: var(--accent); color: white; border-color: var(--accent);
+}
+.vocab-filters .pill .count {
+  font-size: 11px; font-weight: 600; opacity: .8;
+  padding: 1px 6px; background: rgba(0,0,0,.08); border-radius: 999px;
+}
+.vocab-filters .pill.active .count { background: rgba(255,255,255,.22); }
+.hsk-badge {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  color: white; padding: 2px 7px; border-radius: 999px;
+  margin-bottom: 6px; letter-spacing: .4px;
+}
+.hsk-badge.hsk-1 { background: var(--hsk1); }
+.hsk-badge.hsk-2 { background: var(--hsk2); }
+.hsk-badge.hsk-3 { background: var(--hsk3); }
+.hsk-badge.hsk-4 { background: var(--hsk4); }
+.hsk-badge.hsk-5 { background: var(--hsk5); }
+.hsk-badge.hsk-6 { background: var(--hsk6); }
