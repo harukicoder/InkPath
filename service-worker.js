@@ -6,7 +6,7 @@
 //     once cached, but updates silently in the background when online.
 //   - Everything else: cache-first, fall back to network, then index.html if HTML.
 
-const VERSION = "v6";
+const VERSION = "v7";
 const APP_CACHE = "inkpath-app-" + VERSION;
 const RUNTIME_CACHE = "inkpath-runtime-" + VERSION;
 

@@ -189,6 +189,48 @@
     return data[0].map(seg => (seg && seg[0]) || "").join("").trim();
   }
 
+  // ============ URL → ARTICLE FETCH ============
+  // We route URLs through Jina's Reader (r.jina.ai/{url}) — it strips nav/ads
+  // and returns clean plain-text with a `Title:` header, no CORS fuss, no key.
+  const URL_RE = /^https?:\/\/\S+$/i;
+  function extractUrl(text) {
+    const t = (text || "").trim();
+    return URL_RE.test(t) ? t : null;
+  }
+  async function fetchArticle(url) {
+    const reader = "https://r.jina.ai/" + url;
+    const res = await fetch(reader, { headers: { "Accept": "text/plain" } });
+    if (!res.ok) throw new Error("fetch HTTP " + res.status);
+    const raw = await res.text();
+    return parseJinaOutput(raw);
+  }
+  // Jina wraps content in a header block. Strip it + markdown noise.
+  function parseJinaOutput(raw) {
+    let title = "";
+    let body = raw || "";
+    // Header block: "Title: ...\nURL Source: ...\nMarkdown Content:\n..."
+    const titleM = body.match(/^Title:\s*(.+)$/m);
+    if (titleM) title = titleM[1].trim();
+    const cutIdx = body.indexOf("Markdown Content:");
+    if (cutIdx >= 0) body = body.slice(cutIdx + "Markdown Content:".length);
+    // Strip markdown images + link wrappers, keep link text.
+    body = body
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/^\s*[-*>]\s+/gm, "")
+      .replace(/`{1,3}[^`]*`{1,3}/g, "")
+      .replace(/<[^>]+>/g, "");
+    // Keep only lines containing CJK characters (drops footers, share links).
+    body = body
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(l => l && HAS_CJK.test(l))
+      .join("\n")
+      .trim();
+    return { title, body };
+  }
+
   function storyNeedsTranslation(story) {
     if (!story || !story.sentences) return false;
     return story.sentences.some(s => !s.en || !s.en.trim());
@@ -1021,6 +1063,7 @@
         <h2 class="reader-title">
           ${story.title.hz}
           <span class="py">${story.title.py} · ${story.title.en}</span>
+          ${story.sourceUrl ? `<a class="source-link" href="${story.sourceUrl}" target="_blank" rel="noopener" title="Open source">🔗 source</a>` : ""}
         </h2>
         ${isPaste ? `<button class="ctrl-btn" id="save-paste">☆ Save to library</button>` : ""}
         ${needsTrans ? `<button class="ctrl-btn" id="translate-btn" title="Fetch English translations from Google">🌐 Translate</button>` : ""}
@@ -1169,11 +1212,11 @@
     view.innerHTML = `
       <div class="hero">
         <h1>Paste any Chinese text</h1>
-        <p>Drop in an article, song, menu, or chat. We'll segment it into tappable words.</p>
+        <p>Drop in an article, song, menu, or chat — or paste a URL and we'll fetch the article for you.</p>
       </div>
       <div class="paste-wrap">
         <textarea id="paste-input" class="paste-input" rows="10"
-          placeholder="粘贴任何中文文本…"
+          placeholder="粘贴任何中文文本… 或者 https://example.com/article"
           spellcheck="false">${draft.replace(/</g, "&lt;")}</textarea>
         <div class="paste-actions">
           <button id="paste-go" class="ctrl-btn">Segment &amp; read →</button>
@@ -1181,27 +1224,80 @@
           <button id="paste-clear" class="ctrl-btn secondary">Clear</button>
           <span class="paste-hint">Tip: any unrecognized word falls back to single-character lookup.</span>
         </div>
+        <div id="paste-status" class="paste-status hidden"></div>
       </div>
     `;
     const input = document.getElementById("paste-input");
-    document.getElementById("paste-go").onclick = () => {
-      const raw = (input.value || "").trim();
-      if (!raw) return;
+    const goBtn = document.getElementById("paste-go");
+    const statusEl = document.getElementById("paste-status");
+
+    function setStatus(msg, kind) {
+      if (!statusEl) return;
+      if (!msg) { statusEl.classList.add("hidden"); statusEl.textContent = ""; return; }
+      statusEl.classList.remove("hidden");
+      statusEl.className = "paste-status" + (kind ? " " + kind : "");
+      statusEl.textContent = msg;
+    }
+
+    function reflectInputMode() {
+      const url = extractUrl(input.value);
+      goBtn.innerHTML = url ? "🌐 Fetch article &amp; read →" : "Segment &amp; read →";
+    }
+    input.addEventListener("input", reflectInputMode);
+    reflectInputMode();
+
+    async function openStoryFromText(raw, meta) {
       const sentences = tokenizeText(raw);
-      if (!sentences.length) return;
+      if (!sentences.length) { setStatus("Couldn't find any Chinese text to segment.", "error"); return; }
+      const titleHz = (meta && meta.title) ? meta.title.slice(0, 60) : "我的文本";
       state.customStory = {
         id: "__paste__",
         level: "paste",
         __raw: raw,
-        title: { hz: "我的文本", py: "Wǒ de wénběn", en: "Your pasted text" },
-        description: "Tokenized from pasted text.",
+        sourceUrl: (meta && meta.sourceUrl) || null,
+        title: {
+          hz: titleHz,
+          py: "",
+          en: (meta && meta.title) ? "" : "Your pasted text"
+        },
+        description: (meta && meta.sourceUrl) ? ("Fetched from " + meta.sourceUrl) : "Tokenized from pasted text.",
         sentences
       };
       saveCustomStory();
       state.route = "reader";
       state.storyId = "__paste__";
       render();
+    }
+
+    goBtn.onclick = async () => {
+      const raw = (input.value || "").trim();
+      if (!raw) return;
+      const url = extractUrl(raw);
+      if (url) {
+        goBtn.disabled = true;
+        setStatus("Fetching article… this can take ~10s for long pages.", "loading");
+        try {
+          const { title, body } = await fetchArticle(url);
+          if (!body || !body.trim()) {
+            setStatus("Fetched, but no Chinese text was found on that page.", "error");
+            goBtn.disabled = false;
+            return;
+          }
+          // Show the user what we got before leaving the paste view.
+          input.value = (title ? title + "\n\n" : "") + body;
+          reflectInputMode();
+          setStatus("Got it — opening reader…", "ok");
+          await openStoryFromText(input.value.trim(), { title, sourceUrl: url });
+        } catch (err) {
+          console.warn("[InkPath] fetchArticle failed:", err);
+          setStatus("Couldn't fetch that URL. Check the link, or copy-paste the text directly.", "error");
+          goBtn.disabled = false;
+        }
+        return;
+      }
+      await openStoryFromText(raw);
     };
+
     const re = document.getElementById("paste-reopen");
     if (re) re.onclick = () => {
       state.route = "reader"; state.storyId = "__paste__"; render();
