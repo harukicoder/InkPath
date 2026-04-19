@@ -4,6 +4,17 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>InkPath · Learn Mandarin with Stories</title>
+
+<!-- PWA: installable + offline -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#c8102e" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#15141a" media="(prefers-color-scheme: dark)" />
+<link rel="icon" type="image/svg+xml" href="icon.svg" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="InkPath" />
+
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -48,6 +59,94 @@
       messagingSenderId: "614147827163",
       appId: "1:614147827163:web:184948e51410dda5bd33fe"
     });
+  </script>
+
+  <!-- PWA install prompt container (Chrome/Android) -->
+  <div id="pwa-install" class="pwa-install hidden">
+    <span>Install InkPath for offline use</span>
+    <button id="pwa-install-btn">Install</button>
+    <button id="pwa-install-dismiss" aria-label="Dismiss">×</button>
+  </div>
+  <div id="pwa-offline" class="pwa-offline hidden">Offline · showing saved content</div>
+  <div id="pwa-update" class="pwa-update hidden">
+    <span>New version available</span>
+    <button id="pwa-update-btn">Refresh</button>
+  </div>
+
+  <script>
+    // Service worker registration + update + online/offline UI
+    (function () {
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("service-worker.js").then((reg) => {
+            // Watch for an updated SW waiting to activate.
+            function trackWaiting(worker) {
+              if (!worker) return;
+              worker.addEventListener("statechange", () => {
+                if (worker.state === "installed" && navigator.serviceWorker.controller) {
+                  const bar = document.getElementById("pwa-update");
+                  if (bar) bar.classList.remove("hidden");
+                }
+              });
+            }
+            if (reg.waiting) trackWaiting(reg.waiting);
+            reg.addEventListener("updatefound", () => trackWaiting(reg.installing));
+
+            const upBtn = document.getElementById("pwa-update-btn");
+            if (upBtn) upBtn.addEventListener("click", () => {
+              if (reg.waiting) reg.waiting.postMessage("SKIP_WAITING");
+            });
+
+            // Reload once the new SW takes control.
+            let refreshing = false;
+            navigator.serviceWorker.addEventListener("controllerchange", () => {
+              if (refreshing) return;
+              refreshing = true;
+              window.location.reload();
+            });
+          }).catch((err) => console.warn("[InkPath] SW registration failed:", err));
+        });
+      }
+
+      // Online/offline banner
+      const offlineEl = document.getElementById("pwa-offline");
+      function updateOnline() {
+        if (!offlineEl) return;
+        offlineEl.classList.toggle("hidden", navigator.onLine);
+      }
+      window.addEventListener("online", updateOnline);
+      window.addEventListener("offline", updateOnline);
+      updateOnline();
+
+      // Install prompt (Chrome, Edge, Android)
+      let deferredPrompt = null;
+      const installBar = document.getElementById("pwa-install");
+      const installBtn = document.getElementById("pwa-install-btn");
+      const dismissBtn = document.getElementById("pwa-install-dismiss");
+      const dismissed = localStorage.getItem("inkpath_install_dismissed") === "1";
+
+      window.addEventListener("beforeinstallprompt", (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        if (installBar && !dismissed && !matchMedia("(display-mode: standalone)").matches) {
+          installBar.classList.remove("hidden");
+        }
+      });
+      if (installBtn) installBtn.addEventListener("click", async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        installBar.classList.add("hidden");
+      });
+      if (dismissBtn) dismissBtn.addEventListener("click", () => {
+        localStorage.setItem("inkpath_install_dismissed", "1");
+        installBar.classList.add("hidden");
+      });
+      window.addEventListener("appinstalled", () => {
+        if (installBar) installBar.classList.add("hidden");
+      });
+    })();
   </script>
   <script src="data/dictionary.js"></script>
   <script src="data/hsk-dict.js"></script>

@@ -1,0 +1,20 @@
+{
+  "name": "墨径 · InkPath",
+  "short_name": "InkPath",
+  "description": "Learn Mandarin through stories. Tap any word for pinyin, meaning, and audio.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#faf7f2",
+  "theme_color": "#c8102e",
+  "lang": "en",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

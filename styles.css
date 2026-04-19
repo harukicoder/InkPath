@@ -391,3 +391,29 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 .hsk-badge.hsk-4 { background: var(--hsk4); }
 .hsk-badge.hsk-5 { background: var(--hsk5); }
 .hsk-badge.hsk-6 { background: var(--hsk6); }
+
+/* ---- PWA banners ---- */
+.pwa-install, .pwa-update {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 8px 10px 8px 16px;
+  box-shadow: var(--shadow); z-index: 30;
+  font-size: 13px; max-width: 92vw;
+}
+.pwa-install.hidden, .pwa-update.hidden, .pwa-offline.hidden { display: none; }
+.pwa-install button, .pwa-update button {
+  background: var(--accent); color: #fff; border: none;
+  padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 13px;
+}
+.pwa-install #pwa-install-dismiss {
+  background: transparent; color: var(--muted); padding: 4px 8px; font-size: 16px;
+}
+.pwa-install #pwa-install-dismiss:hover { color: var(--accent); }
+.pwa-offline {
+  position: fixed; top: 0; left: 0; right: 0;
+  background: #2d2b36; color: #faf7f2;
+  text-align: center; padding: 6px 12px;
+  font-size: 12px; z-index: 40; letter-spacing: .3px;
+}
