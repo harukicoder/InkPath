@@ -547,6 +547,25 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 .hsk-row-pct { font-size: 13px; font-weight: 700; color: var(--ink); min-width: 40px; text-align: right; }
 .hsk-other-note { text-align: center; color: var(--muted); font-size: 13px; margin-top: 14px; }
 
+/* ---- Reader: on-demand translation banner ---- */
+.translate-status {
+  display: inline-block;
+  font-size: 12px; color: var(--muted);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 6px 14px;
+  margin: 0 0 14px;
+  letter-spacing: .2px;
+}
+.translate-status::before {
+  content: ""; display: inline-block;
+  width: 10px; height: 10px; margin-right: 8px;
+  border: 2px solid var(--accent); border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: -1px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* ---- Reader: implicit-known words (read-through stories) ---- */
 /* These look like plain confident text — no highlight, no underline — to
    distinguish from .saved (explicit bookmark, yellow) and .new (pink pulse). */

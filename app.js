@@ -173,6 +173,87 @@
     return hits;
   }
 
+  // ============ ON-DEMAND TRANSLATION ============
+  // Uses the unauthenticated Google Translate gtx endpoint (same one countless
+  // browser extensions use). CORS-permissive, no API key, no rate-limit that
+  // matters for single-user traffic. We batch concurrent requests to 3.
+  async function translateChinese(text) {
+    if (!text || !text.trim()) return "";
+    const url = "https://translate.googleapis.com/translate_a/single"
+      + "?client=gtx&sl=zh-CN&tl=en&dt=t&q=" + encodeURIComponent(text);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("translate HTTP " + res.status);
+    const data = await res.json();
+    // Response shape: [[["segment en","segment zh",...], ...], ...]
+    if (!Array.isArray(data) || !Array.isArray(data[0])) throw new Error("bad response");
+    return data[0].map(seg => (seg && seg[0]) || "").join("").trim();
+  }
+
+  function storyNeedsTranslation(story) {
+    if (!story || !story.sentences) return false;
+    return story.sentences.some(s => !s.en || !s.en.trim());
+  }
+
+  // Fill in missing `en` fields for `story`. Live-updates the DOM if the reader
+  // is the active view, and persists the result if the story lives in the
+  // paste library or is the current customStory.
+  let translatingNow = false;
+  async function ensureTranslations(story) {
+    if (translatingNow || !story || !story.sentences) return;
+    const missing = [];
+    story.sentences.forEach((s, i) => { if (!s.en || !s.en.trim()) missing.push({ s, i }); });
+    if (!missing.length) return;
+
+    translatingNow = true;
+    setTranslateStatus("Translating 0 / " + missing.length + "…");
+
+    const LIMIT = 3;
+    const queue = missing.slice();
+    let done = 0;
+    async function worker() {
+      while (queue.length) {
+        const { s, i } = queue.shift();
+        const text = s.words.map(w => w.hz).join("");
+        try {
+          const en = await translateChinese(text);
+          s.en = en;
+          const el = view.querySelector(`.sentence[data-i="${i}"] .en-line`);
+          if (el) el.textContent = en;
+        } catch (err) {
+          console.warn("[InkPath] translate failed for sentence", i, err);
+        }
+        done++;
+        setTranslateStatus("Translating " + done + " / " + missing.length + "…");
+      }
+    }
+    try {
+      await Promise.all(Array(LIMIT).fill(0).map(worker));
+    } finally {
+      translatingNow = false;
+      setTranslateStatus("");
+    }
+
+    // Persist wherever this story lives.
+    if (state.customStory && story.id === state.customStory.id && story !== state.customStory) {
+      // Shouldn't happen — but guard anyway.
+    }
+    if (state.customStory && story === state.customStory) saveCustomStory();
+    if ((state.pasteLibrary || []).some(x => x.id === story.id)) {
+      const idx = state.pasteLibrary.findIndex(x => x.id === story.id);
+      if (idx >= 0) state.pasteLibrary[idx] = story;
+      savePasteLibrary();
+    }
+    // Re-render the translate button so it hides if everything's now filled.
+    const btn = document.getElementById("translate-btn");
+    if (btn && !storyNeedsTranslation(story)) btn.remove();
+  }
+  function setTranslateStatus(msg) {
+    const el = document.getElementById("translate-status");
+    if (!el) return;
+    if (msg) { el.textContent = msg; el.classList.remove("hidden"); }
+    else el.classList.add("hidden");
+  }
+
   // ============ TOKENIZER (paste-to-learn) ============
   // Greedy longest-match against HSK_DICT + DICT. Punctuation attaches to the
   // previous word to match the existing story word format.
@@ -931,6 +1012,9 @@
     const covPct = cov.total ? Math.round((cov.known / cov.total) * 100) : 0;
 
     const isPaste = story.id === "__paste__";
+    const isUserSaved = (state.pasteLibrary || []).some(s => s.id === story.id);
+    const userAuthored = isPaste || isUserSaved;
+    const needsTrans = userAuthored && storyNeedsTranslation(story);
     view.innerHTML = `
       <div class="reader-top">
         <button class="back-btn" id="back">← Library</button>
@@ -939,8 +1023,10 @@
           <span class="py">${story.title.py} · ${story.title.en}</span>
         </h2>
         ${isPaste ? `<button class="ctrl-btn" id="save-paste">☆ Save to library</button>` : ""}
+        ${needsTrans ? `<button class="ctrl-btn" id="translate-btn" title="Fetch English translations from Google">🌐 Translate</button>` : ""}
         <span class="reader-coverage">${cov.known}/${cov.total} known · ${covPct}%</span>
       </div>
+      <div id="translate-status" class="translate-status hidden"></div>
       <div id="voice-warning" class="voice-warning" style="display:none">
         No Chinese voice is installed. On iOS: Settings → Accessibility → Spoken Content → Voices → Chinese.
         On desktop, try Chrome or Edge for higher-quality network voices.
@@ -997,6 +1083,13 @@
     document.getElementById("back").onclick = () => { state.route = "library"; render(); };
     const saveBtn = document.getElementById("save-paste");
     if (saveBtn) saveBtn.onclick = () => openSavePasteDialog(story);
+    const transBtn = document.getElementById("translate-btn");
+    if (transBtn) transBtn.onclick = () => ensureTranslations(story);
+    // Auto-fetch translations the moment the user turns on the Translation
+    // toggle, if the story has any missing.
+    if (userAuthored && state.showTranslation && needsTrans) {
+      ensureTranslations(story);
+    }
     document.getElementById("tg-py").onchange = e => {
       state.showPinyin = e.target.checked;
       document.getElementById("sentences").classList.toggle("show-pinyin", state.showPinyin);
@@ -1004,6 +1097,9 @@
     document.getElementById("tg-en").onchange = e => {
       state.showTranslation = e.target.checked;
       document.getElementById("sentences").classList.toggle("show-translation", state.showTranslation);
+      if (state.showTranslation && userAuthored && storyNeedsTranslation(story)) {
+        ensureTranslations(story);
+      }
     };
     document.getElementById("play-all").onclick = () => playAll(story);
     document.getElementById("stop").onclick = () => speechSynthesis.cancel();
