@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>InkPath · Learn Mandarin with Stories</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand" data-nav="library">墨径 · InkPath</div>
+    <nav class="nav">
+      <button data-nav="library">Library</button>
+      <button data-nav="vocab">Vocabulary</button>
+    </nav>
+  </header>
+
+  <main id="view"></main>
+
+  <div id="popup" class="popup hidden">
+    <div class="popup-hz"></div>
+    <div class="popup-py"></div>
+    <div class="popup-en"></div>
+    <div class="popup-actions">
+      <button id="popup-play">🔊 Play</button>
+      <button id="popup-save">☆ Save word</button>
+    </div>
+  </div>
+
+  <script src="data/dictionary.js"></script>
+  <script src="data/stories.js"></script>
+  <script src="data/stories-extra.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
