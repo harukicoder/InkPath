@@ -37,6 +37,13 @@ body {
   font-size: 15px; cursor: pointer; color: var(--ink); border-radius: 8px;
 }
 .nav button:hover { background: var(--accent-soft); color: var(--accent); }
+#auth-area { margin-left: 12px; display: inline-flex; align-items: center; gap: 6px; }
+#auth-btn {
+  background: var(--accent); color: #fff; border: none;
+  padding: 7px 12px; font-size: 13px; border-radius: 8px; cursor: pointer;
+}
+#auth-btn:hover { filter: brightness(1.05); }
+#auth-status { font-size: 12px; color: var(--muted); }
 
 main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 

@@ -12,6 +12,10 @@
     <nav class="nav">
       <button data-nav="library">Library</button>
       <button data-nav="vocab">Vocabulary</button>
+      <span id="auth-area">
+        <button id="auth-btn">Sign in</button>
+        <span id="auth-status"></span>
+      </span>
     </nav>
   </header>
 
@@ -27,6 +31,19 @@
     </div>
   </div>
 
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey: "AIzaSyAoJa0pMA-nhJSbyJ9qjjkpXeKR4UD6UV0",
+      authDomain: "chinese-flashcards-piao.firebaseapp.com",
+      projectId: "chinese-flashcards-piao",
+      storageBucket: "chinese-flashcards-piao.firebasestorage.app",
+      messagingSenderId: "614147827163",
+      appId: "1:614147827163:web:184948e51410dda5bd33fe"
+    });
+  </script>
   <script src="data/dictionary.js"></script>
   <script src="data/stories.js"></script>
   <script src="data/stories-extra.js"></script>

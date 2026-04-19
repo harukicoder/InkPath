@@ -25,6 +25,95 @@
   }
   function saveVocab() {
     localStorage.setItem("duchinese_vocab", JSON.stringify(state.vocab));
+    cloudPushVocab();
+  }
+
+  // ============ CLOUD SYNC (Firebase) ============
+  let currentUser = null;
+  let cloudPushTimer = null;
+  const hasFirebase = typeof firebase !== "undefined" && firebase.apps && firebase.apps.length;
+
+  function mergeVocabLists(a, b) {
+    const map = new Map();
+    for (const w of [...a, ...b]) {
+      if (!w || !w.hz) continue;
+      if (!map.has(w.hz)) map.set(w.hz, w);
+    }
+    return [...map.values()];
+  }
+
+  function cloudPushVocab() {
+    if (!hasFirebase || !currentUser) return;
+    clearTimeout(cloudPushTimer);
+    setAuthStatus("Saving…");
+    cloudPushTimer = setTimeout(() => {
+      firebase.firestore().collection("users").doc(currentUser.uid).set({
+        vocab: state.vocab,
+        vocabUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        email: currentUser.email
+      }, { merge: true })
+        .then(() => setAuthStatus("Synced"))
+        .catch(() => setAuthStatus("Offline"));
+    }, 600);
+  }
+
+  function cloudPullVocab() {
+    if (!hasFirebase || !currentUser) return;
+    setAuthStatus("Loading…");
+    firebase.firestore().collection("users").doc(currentUser.uid).get()
+      .then(snap => {
+        const data = snap.exists ? snap.data() : {};
+        const cloudVocab = Array.isArray(data.vocab) ? data.vocab : [];
+        const merged = mergeVocabLists(cloudVocab, state.vocab);
+        const changed = merged.length !== state.vocab.length || merged.length !== cloudVocab.length;
+        state.vocab = merged;
+        localStorage.setItem("duchinese_vocab", JSON.stringify(state.vocab));
+        setAuthStatus("Synced");
+        if (changed) cloudPushVocab();
+        render();
+      })
+      .catch(() => setAuthStatus("Offline"));
+  }
+
+  function setAuthStatus(msg) {
+    const el = document.getElementById("auth-status");
+    if (el) el.textContent = msg ? " · " + msg : "";
+  }
+
+  function updateAuthButton() {
+    const btn = document.getElementById("auth-btn");
+    if (!btn) return;
+    if (currentUser) {
+      const name = currentUser.displayName || currentUser.email || "Signed in";
+      btn.textContent = "Sign out (" + name + ")";
+    } else {
+      btn.textContent = "Sign in to sync";
+    }
+  }
+
+  if (hasFirebase) {
+    const authBtn = document.getElementById("auth-btn");
+    authBtn.addEventListener("click", () => {
+      if (currentUser) {
+        firebase.auth().signOut();
+      } else {
+        const p = new firebase.auth.GoogleAuthProvider();
+        firebase.auth().signInWithPopup(p).catch(err => {
+          if (err && (err.code === "auth/popup-blocked" || err.code === "auth/popup-closed-by-user")) {
+            firebase.auth().signInWithRedirect(p);
+          }
+        });
+      }
+    });
+    firebase.auth().onAuthStateChanged(u => {
+      currentUser = u || null;
+      updateAuthButton();
+      if (currentUser) cloudPullVocab();
+      else setAuthStatus("");
+    });
+  } else {
+    const btn = document.getElementById("auth-btn");
+    if (btn) btn.style.display = "none";
   }
 
   function stripPunct(s) {
