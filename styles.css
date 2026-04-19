@@ -547,6 +547,94 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 .hsk-row-pct { font-size: 13px; font-weight: 700; color: var(--ink); min-width: 40px; text-align: right; }
 .hsk-other-note { text-align: center; color: var(--muted); font-size: 13px; margin-top: 14px; }
 
+/* ---- Reader: pronunciation grader ---- */
+.mic-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: 6px; padding: 2px 8px;
+  font-size: 11px; line-height: 1;
+  background: transparent;
+  border: 1px solid var(--border); border-radius: 999px;
+  cursor: pointer; vertical-align: middle;
+  opacity: 0; transition: opacity .15s, border-color .15s, background .15s;
+}
+.sentence:hover .mic-chip,
+.sentence .pronun-check ~ .hz-line .mic-chip { opacity: 1; }
+.mic-chip:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+/* Panel attached under the sentence */
+.pronun-check {
+  margin-top: 10px; padding: 10px 12px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; font-size: 14px;
+  animation: pronun-in .18s ease;
+}
+@keyframes pronun-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+.pronun-check .pronun-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.pronun-check .pronun-status { flex: 1; color: var(--ink); font-size: 13px; }
+.pronun-check .pronun-status.error { color: var(--accent); }
+.pronun-check .pronun-dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--accent); margin-right: 8px; vertical-align: middle;
+  animation: pronun-pulse 1s ease-in-out infinite;
+}
+@keyframes pronun-pulse {
+  0%, 100% { transform: scale(1);   opacity: 1; }
+  50%      { transform: scale(1.5); opacity: .4; }
+}
+.pronun-check .pronun-interim {
+  font-size: 20px; color: var(--muted); margin-top: 6px; min-height: 24px;
+  letter-spacing: 1px;
+}
+.pronun-check .pronun-stop,
+.pronun-check .pronun-retry,
+.pronun-check .pronun-play,
+.pronun-check .pronun-close {
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 5px 12px; font-size: 13px; cursor: pointer;
+}
+.pronun-check .pronun-stop:hover,
+.pronun-check .pronun-retry:hover,
+.pronun-check .pronun-play:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.pronun-check .pronun-close { padding: 5px 10px; font-size: 16px; line-height: 1; }
+
+/* Score header */
+.pronun-header {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 8px 12px; border-radius: 8px;
+  margin: -10px -12px 10px;
+}
+.pronun-header .pronun-score { font-size: 28px; font-weight: 700; letter-spacing: -.5px; }
+.pronun-header .pronun-label { font-size: 14px; font-weight: 600; opacity: .9; }
+.pronun-header.great { background: rgba(79, 192, 141, .16); color: #2e8b57; }
+.pronun-header.ok    { background: rgba(212, 184, 94,  .20); color: #a57a18; }
+.pronun-header.low   { background: rgba(255, 107, 122, .18); color: var(--accent); }
+:root[data-theme="dark"] .pronun-header.great,
+:root:not([data-theme]) .pronun-header.great { color: #4fc08d; }
+:root[data-theme="dark"] .pronun-header.ok,
+:root:not([data-theme]) .pronun-header.ok    { color: #d4b85e; }
+
+/* Diff rows */
+.pronun-detail { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.pronun-line { display: flex; gap: 10px; align-items: baseline; }
+.pronun-line .pronun-key {
+  font-size: 11px; font-weight: 700; color: var(--muted);
+  letter-spacing: .6px; text-transform: uppercase; min-width: 48px;
+}
+.pronun-line .pronun-text {
+  font-size: 22px; letter-spacing: 2px; line-height: 1.4;
+}
+.pronun-text .ok { color: var(--ink); }
+.pronun-text .miss { color: var(--accent); text-decoration: underline wavy var(--accent); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+.pronun-text .missed-target { color: var(--muted); opacity: .55; }
+
+.pronun-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
 /* ---- Reader: on-demand translation banner ---- */
 .translate-status {
   display: inline-block;

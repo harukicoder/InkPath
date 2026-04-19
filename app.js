@@ -1070,6 +1070,7 @@
                 </span>`;
               }).join("")}
               <button class="en-chip" data-i="${i}" title="Show translation">EN</button>
+              ${SR_AVAILABLE ? `<button class="mic-chip" data-i="${i}" title="Check your pronunciation">🎤</button>` : ""}
             </div>
             <div class="en-line">${s.en}</div>
           </div>
@@ -1136,6 +1137,14 @@
         e.stopPropagation();
         const sent = el.closest(".sentence");
         if (sent) sent.classList.toggle("show-en");
+      });
+    });
+    view.querySelectorAll(".mic-chip").forEach(el => {
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const i = +el.dataset.i;
+        const sentEl = el.closest(".sentence");
+        if (sentEl) startPronunciationCheck(sentEl, story.sentences[i]);
       });
     });
     view.querySelectorAll(".sentence").forEach(el => {
@@ -1507,6 +1516,228 @@
     if (e.target.closest(".word")) return;
     hidePopup();
   });
+
+  // ============ PRONUNCIATION GRADER ============
+  // Uses Web Speech API (SpeechRecognition / webkitSpeechRecognition) with
+  // zh-CN. Compares the transcription to the sentence hz via character-level
+  // F1 (LCS-based) and shows a live feedback panel below the sentence.
+  const SR_CTOR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const SR_AVAILABLE = !!SR_CTOR;
+  let activeRec = null;
+
+  function stripForPronun(s) {
+    // Pronunciation score should ignore punctuation + whitespace. Keep only
+    // CJK + ASCII letters/digits (for sentences mixing in brand names, etc.).
+    return (s || "").replace(/[\s。，！？、；：.,!?;:"'“”‘’（）()《》<>【】\[\]—\-–…~`]/g, "");
+  }
+
+  function lcsDp(a, b) {
+    const m = a.length, n = b.length;
+    const dp = Array.from({ length: m + 1 }, () => new Int16Array(n + 1));
+    for (let i = 1; i <= m; i++) {
+      const ai = a[i - 1];
+      for (let j = 1; j <= n; j++) {
+        dp[i][j] = ai === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+    return dp;
+  }
+  function scorePronunciation(expected, heard) {
+    if (!expected || !heard) return 0;
+    const dp = lcsDp(expected, heard);
+    const lcs = dp[expected.length][heard.length];
+    const precision = lcs / heard.length;
+    const recall = lcs / expected.length;
+    if (!precision || !recall) return 0;
+    const f1 = 2 * precision * recall / (precision + recall);
+    return Math.round(f1 * 100);
+  }
+  // Mark each char of `heard` as match/miss via LCS backtrace.
+  function diffHeardAgainstExpected(expected, heard) {
+    const dp = lcsDp(expected, heard);
+    const marks = new Array(heard.length).fill(false);
+    let i = expected.length, j = heard.length;
+    while (i > 0 && j > 0) {
+      if (expected[i - 1] === heard[j - 1]) { marks[j - 1] = true; i--; j--; }
+      else if (dp[i - 1][j] >= dp[i][j - 1]) i--;
+      else j--;
+    }
+    // Also compute which expected chars were missed (not in LCS) — helpful to
+    // show under "target" so the user sees what they dropped.
+    const expectedMarks = new Array(expected.length).fill(false);
+    let i2 = expected.length, j2 = heard.length;
+    while (i2 > 0 && j2 > 0) {
+      if (expected[i2 - 1] === heard[j2 - 1]) { expectedMarks[i2 - 1] = true; i2--; j2--; }
+      else if (dp[i2 - 1][j2] >= dp[i2][j2 - 1]) i2--;
+      else j2--;
+    }
+    return { heardMarks: marks, expectedMarks };
+  }
+
+  function startPronunciationCheck(sentenceEl, sentence) {
+    if (!SR_AVAILABLE) return;
+    // Cancel any prior session.
+    if (activeRec) { try { activeRec.abort(); } catch (_) {} activeRec = null; }
+    try { speechSynthesis.cancel(); } catch (_) {}
+
+    // Remove any previous panel on this sentence.
+    const prev = sentenceEl.querySelector(".pronun-check");
+    if (prev) prev.remove();
+
+    const expected = sentence.words.map(w => w.hz).join("");
+    const expectedClean = stripForPronun(expected);
+
+    const panel = document.createElement("div");
+    panel.className = "pronun-check listening";
+    panel.innerHTML = `
+      <div class="pronun-row">
+        <span class="pronun-status"><span class="pronun-dot"></span>Listening… speak the sentence</span>
+        <button class="pronun-stop" type="button">Stop</button>
+      </div>
+      <div class="pronun-interim"></div>
+    `;
+    sentenceEl.appendChild(panel);
+    // Clicks inside the panel must not bubble to the sentence's play handler.
+    panel.addEventListener("click", (e) => e.stopPropagation());
+
+    const rec = new SR_CTOR();
+    rec.lang = "zh-CN";
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    rec.continuous = false;
+    activeRec = rec;
+
+    let finalTranscript = "";
+    let interim = "";
+    rec.onresult = (ev) => {
+      finalTranscript = ""; interim = "";
+      for (let i = 0; i < ev.results.length; i++) {
+        const r = ev.results[i];
+        if (r.isFinal) finalTranscript += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      const interimEl = panel.querySelector(".pronun-interim");
+      if (interimEl) interimEl.textContent = interim || finalTranscript || "";
+    };
+    rec.onerror = (ev) => {
+      activeRec = null;
+      const msg = pronunErrorMessage(ev.error);
+      panel.classList.remove("listening");
+      panel.innerHTML = `
+        <div class="pronun-row">
+          <span class="pronun-status error">${msg}</span>
+          <button class="pronun-retry" type="button">🎤 Try again</button>
+          <button class="pronun-close" type="button" aria-label="Close">×</button>
+        </div>
+      `;
+      panel.querySelector(".pronun-retry").onclick = (e) => {
+        e.stopPropagation();
+        startPronunciationCheck(sentenceEl, sentence);
+      };
+      panel.querySelector(".pronun-close").onclick = (e) => {
+        e.stopPropagation();
+        panel.remove();
+      };
+    };
+    rec.onend = () => {
+      if (activeRec === rec) activeRec = null;
+      const heard = (finalTranscript || interim || "").trim();
+      if (!heard) {
+        panel.classList.remove("listening");
+        panel.innerHTML = `
+          <div class="pronun-row">
+            <span class="pronun-status">I didn't catch anything.</span>
+            <button class="pronun-retry" type="button">🎤 Try again</button>
+            <button class="pronun-close" type="button" aria-label="Close">×</button>
+          </div>
+        `;
+        panel.querySelector(".pronun-retry").onclick = (e) => {
+          e.stopPropagation();
+          startPronunciationCheck(sentenceEl, sentence);
+        };
+        panel.querySelector(".pronun-close").onclick = (e) => {
+          e.stopPropagation();
+          panel.remove();
+        };
+        return;
+      }
+      renderPronunResult(panel, sentenceEl, sentence, expected, expectedClean, heard);
+    };
+
+    panel.querySelector(".pronun-stop").onclick = (e) => {
+      e.stopPropagation();
+      try { rec.stop(); } catch (_) {}
+    };
+
+    try {
+      rec.start();
+    } catch (err) {
+      // start() throws if a rec is already running. Abort + retry once.
+      try { rec.abort(); } catch (_) {}
+      setTimeout(() => { try { rec.start(); } catch (_) {} }, 150);
+    }
+  }
+
+  function pronunErrorMessage(code) {
+    switch (code) {
+      case "not-allowed":
+      case "service-not-allowed":
+        return "Microphone blocked. Allow mic access and reload.";
+      case "no-speech": return "No speech detected. Try again closer to the mic.";
+      case "audio-capture": return "No microphone found.";
+      case "network": return "Network error — speech recognition needs the internet.";
+      case "aborted": return "Stopped.";
+      case "language-not-supported": return "Chinese recognition isn't supported here. Try Chrome desktop.";
+      default: return "Error: " + (code || "unknown");
+    }
+  }
+
+  function renderPronunResult(panel, sentenceEl, sentence, expected, expectedClean, heardRaw) {
+    const heardClean = stripForPronun(heardRaw);
+    const score = scorePronunciation(expectedClean, heardClean);
+    const tier = score >= 85 ? "great" : score >= 65 ? "ok" : "low";
+    const label = score >= 90 ? "Excellent!"
+      : score >= 75 ? "Nice — very close."
+      : score >= 55 ? "Getting there."
+      : "Keep practicing.";
+    const { heardMarks, expectedMarks } = diffHeardAgainstExpected(expectedClean, heardClean);
+
+    const heardHtml = heardClean.split("").map((ch, i) =>
+      `<span class="${heardMarks[i] ? "ok" : "miss"}">${escapeHtml(ch)}</span>`
+    ).join("");
+    const targetHtml = expectedClean.split("").map((ch, i) =>
+      `<span class="${expectedMarks[i] ? "ok" : "missed-target"}">${escapeHtml(ch)}</span>`
+    ).join("");
+
+    panel.classList.remove("listening");
+    panel.innerHTML = `
+      <div class="pronun-header ${tier}">
+        <div class="pronun-score">${score}%</div>
+        <div class="pronun-label">${label}</div>
+      </div>
+      <div class="pronun-detail">
+        <div class="pronun-line"><span class="pronun-key">Target</span><span class="pronun-text">${targetHtml}</span></div>
+        <div class="pronun-line"><span class="pronun-key">Heard</span><span class="pronun-text">${heardHtml}</span></div>
+      </div>
+      <div class="pronun-actions">
+        <button class="pronun-play" type="button" title="Hear the target">🔊 Target</button>
+        <button class="pronun-retry" type="button">🎤 Try again</button>
+        <button class="pronun-close" type="button" aria-label="Close">×</button>
+      </div>
+    `;
+    panel.querySelector(".pronun-play").onclick = (e) => { e.stopPropagation(); speak(expected); };
+    panel.querySelector(".pronun-retry").onclick = (e) => {
+      e.stopPropagation();
+      startPronunciationCheck(sentenceEl, sentence);
+    };
+    panel.querySelector(".pronun-close").onclick = (e) => {
+      e.stopPropagation();
+      panel.remove();
+    };
+    // A successful pronunciation is active engagement with the sentence — let
+    // it count the same way a sentence-play would, toward today's "read" goal.
+    if (score >= 65) bumpDaily("read");
+  }
 
   function playSentence(sentence, i) {
     view.querySelectorAll(".sentence").forEach(el => el.classList.remove("active"));
