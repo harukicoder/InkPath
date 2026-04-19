@@ -1,6 +1,7 @@
 :root {
   --bg: #faf7f2;
   --surface: #ffffff;
+  --surface-2: #f3efe6;
   --ink: #1b1b1b;
   --muted: #6b6b6b;
   --accent: #c8102e;
@@ -18,25 +19,49 @@
   --hsk4: #d2691e; --hsk5: #b8860b; --hsk6: #555;
 }
 
+/* Dark palette shared between auto (system) and explicit data-theme="dark" */
+:root[data-theme="dark"],
+:root[data-theme="dark"] body {
+  --bg: #15141a;
+  --surface: #262531;
+  --surface-2: #2f2e3b;
+  --ink: #f1ede5;
+  --muted: #b5ae9e;
+  --accent: #ff6b7a;
+  --accent-soft: #3a1f25;
+  --border: #3a3846;
+  --newbie: #4fc08d;
+  --beginner: #6ab0f3;
+  --intermediate: #c488e0;
+  --shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  --word-saved-bg: #4a3a1c;
+  --word-new-bg: transparent;
+  --word-new-outline: rgba(255, 107, 122, .45);
+  --word-hover-bg: #4f3a1f;
+  --hsk1: #4fc08d; --hsk2: #6ab0f3; --hsk3: #c488e0;
+  --hsk4: #e6a163; --hsk5: #d4b85e; --hsk6: #aaa;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --bg: #15141a;
-    --surface: #1f1e26;
-    --ink: #ece8e2;
-    --muted: #9a9488;
+    --surface: #262531;
+    --surface-2: #2f2e3b;
+    --ink: #f1ede5;
+    --muted: #b5ae9e;
     --accent: #ff6b7a;
     --accent-soft: #3a1f25;
-    --border: #2d2b36;
+    --border: #3a3846;
     --newbie: #4fc08d;
     --beginner: #6ab0f3;
     --intermediate: #c488e0;
     --shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
-    --word-saved-bg: #3a2f14;
+    --word-saved-bg: #4a3a1c;
     --word-new-bg: transparent;
-    --word-new-outline: rgba(255, 107, 122, .35);
-    --word-hover-bg: #403018;
+    --word-new-outline: rgba(255, 107, 122, .45);
+    --word-hover-bg: #4f3a1f;
     --hsk1: #4fc08d; --hsk2: #6ab0f3; --hsk3: #c488e0;
-    --hsk4: #e6a163; --hsk5: #d4b85e; --hsk6: #999;
+    --hsk4: #e6a163; --hsk5: #d4b85e; --hsk6: #aaa;
   }
 }
 
@@ -72,6 +97,12 @@ body {
 }
 #auth-btn:hover { filter: brightness(1.05); }
 #auth-status { font-size: 12px; color: var(--muted); }
+#theme-btn {
+  background: none; border: 1px solid var(--border);
+  font-size: 16px; padding: 5px 10px; border-radius: 8px;
+  cursor: pointer; margin-left: 6px;
+}
+#theme-btn:hover { background: var(--accent-soft); border-color: var(--accent); }
 
 main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 
@@ -126,33 +157,38 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 .reader-title .py { font-size: 14px; color: var(--muted); font-weight: 400; display: block; }
 
 .controls {
-  display: flex; gap: 10px; flex-wrap: wrap;
-  padding: 12px; background: var(--surface); border: 1px solid var(--border);
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  padding: 12px; background: var(--surface-2); border: 1px solid var(--border);
   border-radius: 10px; margin-bottom: 24px;
 }
 .toggle {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 14px; cursor: pointer; user-select: none;
+  color: var(--ink);
 }
 .toggle input { margin: 0; }
 .ctrl-btn {
   background: var(--accent); color: white; border: none;
   padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 14px;
 }
-.ctrl-btn.secondary { background: var(--surface); color: var(--ink); border: 1px solid var(--border); }
+.ctrl-btn.secondary {
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border);
+}
+.ctrl-btn.secondary:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .ctrl-btn:hover { filter: brightness(1.05); }
 .voice-picker {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; color: var(--muted);
+  font-size: 13px; color: var(--ink);
 }
 .voice-picker select {
-  font-size: 13px; padding: 4px 8px; border-radius: 6px;
+  font-size: 13px; padding: 5px 10px; border-radius: 6px;
   border: 1px solid var(--border); background: var(--surface);
-  max-width: 240px;
+  color: var(--ink); max-width: 240px;
 }
 .rate-picker {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; color: var(--muted);
+  font-size: 13px; color: var(--ink);
 }
 .rate-picker input[type="range"] { width: 100px; }
 .controls .spacer { flex: 1; }
@@ -240,11 +276,14 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
   font-size: 11px; color: var(--muted); margin-top: 4px; letter-spacing: .2px;
 }
 .story-card.done { border-color: var(--newbie); }
+.story-card.in-progress { border-color: var(--beginner); }
 .story-card .done-badge {
   position: absolute; top: 10px; right: 10px;
   background: var(--newbie); color: white;
   font-size: 10px; padding: 2px 7px; border-radius: 999px; font-weight: 600;
+  letter-spacing: .3px;
 }
+.story-card .done-badge.in-progress { background: var(--beginner); }
 .story-card { position: relative; }
 
 /* ---- Resume / Continue-reading card ---- */

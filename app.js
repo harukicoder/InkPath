@@ -1,4 +1,33 @@
 (() => {
+  // ============ THEME (light / dark / auto) ============
+  const THEME_KEY = "inkpath_theme";
+  function applyTheme(t) {
+    if (t === "light" || t === "dark") {
+      document.documentElement.setAttribute("data-theme", t);
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+    }
+    const btn = document.getElementById("theme-btn");
+    if (btn) {
+      const effective = t === "auto" || !t
+        ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : t;
+      btn.textContent = effective === "dark" ? "☀️" : "🌙";
+      btn.title = "Theme: " + (t || "auto") + " · click to switch";
+    }
+  }
+  let currentTheme = localStorage.getItem(THEME_KEY) || "auto";
+  applyTheme(currentTheme);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (currentTheme === "auto") applyTheme("auto");
+  });
+  document.getElementById("theme-btn").addEventListener("click", () => {
+    // cycle: auto → light → dark → auto
+    currentTheme = currentTheme === "auto" ? "light" : currentTheme === "light" ? "dark" : "auto";
+    localStorage.setItem(THEME_KEY, currentTheme);
+    applyTheme(currentTheme);
+  });
+
   const view = document.getElementById("view");
   const popup = document.getElementById("popup");
   const popupHz = popup.querySelector(".popup-hz");
@@ -43,14 +72,36 @@
 
   // Unified dictionary lookup: flashcards HSK data wins for examples/HSK,
   // the legacy DICT fills in pinyin/english for anything HSK data is missing.
+  // For compound words not in HSK_DICT, derive the HSK level from the hardest
+  // character component (e.g. 星期六 → max(星=1, 期=2, 六=1) = HSK 2).
+  function deriveHskFromChars(hz) {
+    if (!window.HSK_DICT || !hz || hz.length < 2) return null;
+    let maxLevel = 0;
+    let covered = 0;
+    for (const ch of hz) {
+      // skip non-CJK (shouldn't occur after stripPunct, but defensive)
+      if (!/[\u4e00-\u9fff]/.test(ch)) continue;
+      const entry = window.HSK_DICT[ch];
+      if (entry && typeof entry.hsk === "number") {
+        covered++;
+        if (entry.hsk > maxLevel) maxLevel = entry.hsk;
+      } else {
+        // At least one component unknown → cannot confidently assign an HSK level
+        return null;
+      }
+    }
+    return covered > 0 ? maxLevel : null;
+  }
+
   function dictLookup(hz) {
     const hsk = (window.HSK_DICT && window.HSK_DICT[hz]) || null;
     const base = (window.DICT && window.DICT[hz]) || null;
     if (!hsk && !base) return null;
+    const derivedHsk = hsk ? null : deriveHskFromChars(hz);
     return {
       py: (hsk && hsk.py) || (base && base.py) || "",
       en: (hsk && hsk.en) || (base && base.en) || "",
-      hsk: hsk ? hsk.hsk : null,
+      hsk: hsk ? hsk.hsk : derivedHsk,
       type: hsk ? hsk.type : null,
       ex: (hsk && hsk.ex) || []
     };
@@ -405,20 +456,27 @@
         </div>
         <div class="story-grid">
           ${stories.map(s => {
-            const cov = storyCoverage(s);
-            const pct = cov.total ? Math.round((cov.known / cov.total) * 100) : 0;
+            const total = s.sentences.length;
             const prog = state.progress[s.id];
-            const done = prog && prog.total && (prog.lastSentence + 1) >= prog.total;
+            const read = prog ? Math.min((prog.lastSentence || 0) + 1, total) : 0;
+            const pct = total ? Math.round((read / total) * 100) : 0;
+            const started = read > 0;
+            const done = read >= total;
+            const label = done
+              ? "Read · " + total + " sentences"
+              : started
+                ? read + " / " + total + " sentences · " + pct + "%"
+                : "Not started";
             return `
-              <div class="story-card ${done ? "done" : ""}" data-id="${s.id}">
-                ${done ? `<span class="done-badge">✓ Read</span>` : ""}
+              <div class="story-card ${done ? "done" : ""} ${started && !done ? "in-progress" : ""}" data-id="${s.id}">
+                ${done ? `<span class="done-badge">✓ Read</span>` : started ? `<span class="done-badge in-progress">In progress</span>` : ""}
                 <div class="hz">${s.title.hz}</div>
                 <div class="py">${s.title.py}</div>
                 <div class="en">${s.title.en}</div>
                 <div class="desc">${s.description}</div>
-                <div class="coverage" title="${cov.known} of ${cov.total} unique words saved to your vocabulary">
+                <div class="coverage" title="Reading progress">
                   <div class="coverage-bar"><div style="width:${pct}%"></div></div>
-                  <div class="coverage-label">${cov.known}/${cov.total} words · ${pct}%</div>
+                  <div class="coverage-label">${label}</div>
                 </div>
               </div>
             `;
@@ -561,7 +619,8 @@
       return;
     }
 
-    // Backfill HSK level for anything saved before we had the HSK data.
+    // Backfill HSK level for words saved before derivation existed.
+    // We re-check on every render; dictLookup now also derives from characters.
     let backfilled = false;
     for (const w of state.vocab) {
       if (w.hsk == null) {
