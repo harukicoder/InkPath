@@ -96,15 +96,37 @@
     authBtn.addEventListener("click", () => {
       if (currentUser) {
         firebase.auth().signOut();
-      } else {
-        const p = new firebase.auth.GoogleAuthProvider();
-        firebase.auth().signInWithPopup(p).catch(err => {
-          if (err && (err.code === "auth/popup-blocked" || err.code === "auth/popup-closed-by-user")) {
-            firebase.auth().signInWithRedirect(p);
+        return;
+      }
+      const p = new firebase.auth.GoogleAuthProvider();
+      setAuthStatus("Opening sign-in…");
+      firebase.auth().signInWithPopup(p)
+        .catch(err => {
+          console.error("[InkPath] signInWithPopup failed:", err);
+          const code = err && err.code;
+          if (code === "auth/popup-blocked" || code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+            setAuthStatus("Redirecting…");
+            firebase.auth().signInWithRedirect(p).catch(e2 => {
+              console.error("[InkPath] signInWithRedirect failed:", e2);
+              setAuthStatus("Error: " + (e2.code || e2.message));
+              alert("Sign-in failed: " + (e2.code || e2.message));
+            });
+          } else {
+            setAuthStatus("Error: " + (code || err.message));
+            alert("Sign-in failed: " + (code || err.message) +
+              (code === "auth/unauthorized-domain"
+                ? "\n\nAdd this domain in Firebase Console → Authentication → Settings → Authorized domains."
+                : ""));
           }
         });
-      }
     });
+
+    // Complete sign-in if we just came back from a redirect
+    firebase.auth().getRedirectResult().catch(err => {
+      console.error("[InkPath] getRedirectResult failed:", err);
+      if (err && err.code) setAuthStatus("Error: " + err.code);
+    });
+
     firebase.auth().onAuthStateChanged(u => {
       currentUser = u || null;
       updateAuthButton();
@@ -114,6 +136,7 @@
   } else {
     const btn = document.getElementById("auth-btn");
     if (btn) btn.style.display = "none";
+    console.warn("[InkPath] Firebase SDK not loaded — cloud sync disabled.");
   }
 
   function stripPunct(s) {
