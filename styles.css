@@ -90,13 +90,57 @@ body {
   font-size: 15px; cursor: pointer; color: var(--ink); border-radius: 8px;
 }
 .nav button:hover { background: var(--accent-soft); color: var(--accent); }
-#auth-area { margin-left: 12px; display: inline-flex; align-items: center; gap: 6px; }
-#auth-btn {
-  background: var(--accent); color: #fff; border: none;
-  padding: 7px 12px; font-size: 13px; border-radius: 8px; cursor: pointer;
+#auth-area { margin-left: 12px; display: inline-flex; align-items: center; gap: 8px; }
+#auth-status {
+  font-size: 12px; color: var(--muted);
 }
-#auth-btn:hover { filter: brightness(1.05); }
-#auth-status { font-size: 12px; color: var(--muted); }
+#auth-status:not(:empty) {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--ink);
+}
+
+/* Signed-out — white pill with Google G */
+.auth-signin {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: #fff; color: #3c4043;
+  border: 1px solid #dadce0;
+  border-radius: 999px;
+  padding: 6px 14px 6px 10px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: box-shadow .15s, border-color .15s;
+}
+.auth-signin:hover { box-shadow: 0 1px 4px rgba(0,0,0,.12); border-color: #c4c8cc; }
+.auth-signin .g-icon { flex: 0 0 18px; }
+:root[data-theme="dark"] .auth-signin,
+:root:not([data-theme]) .auth-signin {
+  /* keep Google's official white pill even in dark mode — it's the recognizable pattern */
+}
+
+/* Signed-in — avatar chip */
+.auth-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 4px 12px 4px 4px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.auth-chip:hover { background: var(--accent-soft); border-color: var(--accent); }
+.auth-avatar {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 13px; line-height: 1;
+  overflow: hidden;
+}
+img.auth-avatar { object-fit: cover; }
+.auth-signout-icon {
+  font-size: 14px; color: var(--muted);
+  padding-left: 4px; border-left: 1px solid var(--border);
+}
+.auth-chip:hover .auth-signout-icon { color: var(--accent); }
 #theme-btn {
   background: none; border: 1px solid var(--border);
   font-size: 16px; padding: 5px 10px; border-radius: 8px;
@@ -502,6 +546,87 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 .hsk-row-count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .hsk-row-pct { font-size: 13px; font-weight: 700; color: var(--ink); min-width: 40px; text-align: right; }
 .hsk-other-note { text-align: center; color: var(--muted); font-size: 13px; margin-top: 14px; }
+
+/* ---- Reader: implicit-known words (read-through stories) ---- */
+/* These look like plain confident text — no highlight, no underline — to
+   distinguish from .saved (explicit bookmark, yellow) and .new (pink pulse). */
+.word.known {
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+}
+.word.known:hover { background: var(--word-hover-bg); }
+
+/* ---- HSK dashboard: breakdown sub-line ---- */
+.hsk-breakdown {
+  font-size: 13px; color: var(--muted);
+  display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+/* ---- Save-to-library dialog ---- */
+.dialog-backdrop {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.dialog {
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 14px;
+  padding: 22px 24px; width: 100%; max-width: 420px;
+  box-shadow: 0 20px 48px rgba(0,0,0,.28);
+}
+.dialog h3 { margin: 0 0 14px; font-size: 18px; }
+.dialog-row {
+  display: block; margin-bottom: 14px;
+  font-size: 13px; color: var(--muted);
+}
+.dialog-row > span { display: block; margin-bottom: 5px; }
+.dialog-row input[type="text"] {
+  width: 100%; padding: 8px 10px; font-size: 14px;
+  background: var(--bg); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 8px; outline: none;
+}
+.dialog-row input[type="text"]:focus {
+  border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.dialog-cats {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.cat-pill {
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 5px 12px; font-size: 13px; cursor: pointer;
+}
+.cat-pill:hover { border-color: var(--accent); color: var(--accent); }
+.cat-pill.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.dialog-actions {
+  display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px;
+}
+
+/* ---- Paste library on Library page ---- */
+.level-badge.paste { background: var(--accent); }
+.paste-library .paste-cat { margin-top: 18px; }
+.paste-cat-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 16px; margin: 14px 0 10px; color: var(--ink);
+}
+.paste-cat-emoji { font-size: 18px; }
+.paste-cat-count {
+  font-size: 11px; font-weight: 700; color: var(--muted);
+  padding: 1px 8px; background: var(--surface-2);
+  border-radius: 999px; margin-left: 4px;
+}
+.paste-card .paste-card-remove {
+  position: absolute; top: 8px; left: 8px;
+  background: transparent; border: none; color: var(--muted);
+  font-size: 16px; line-height: 1; cursor: pointer;
+  padding: 2px 6px; border-radius: 4px;
+  opacity: 0; transition: opacity .15s;
+}
+.paste-card:hover .paste-card-remove { opacity: 1; }
+.paste-card .paste-card-remove:hover { color: var(--accent); background: var(--accent-soft); }
 
 /* ---- Vocab card: saved-with-context ---- */
 .vocab-context {

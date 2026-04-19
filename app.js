@@ -46,7 +46,8 @@
     activeSentence: -1,
     currentWord: null,
     currentSentence: null,       // for save-with-context
-    customStory: loadCustomStory(), // user-pasted text
+    customStory: loadCustomStory(), // user-pasted text (draft / last open)
+    pasteLibrary: loadPasteLibrary(), // [{id, title, category, sentences, savedAt}]
     vocab: loadVocab(),
     progress: loadProgress(),
     daily: loadDaily(),
@@ -119,6 +120,22 @@
     else localStorage.removeItem("inkpath_paste");
   }
 
+  const PASTE_CATEGORIES = [
+    { key: "song",     label: "Songs",     emoji: "🎵" },
+    { key: "article",  label: "Articles",  emoji: "📰" },
+    { key: "poem",     label: "Poems",     emoji: "✒️" },
+    { key: "dialogue", label: "Dialogues", emoji: "💬" },
+    { key: "other",    label: "Other",     emoji: "📄" }
+  ];
+  function loadPasteLibrary() {
+    try { return JSON.parse(localStorage.getItem("inkpath_paste_library") || "[]"); }
+    catch { return []; }
+  }
+  function savePasteLibrary() {
+    localStorage.setItem("inkpath_paste_library", JSON.stringify(state.pasteLibrary));
+    cloudPushPasteLibrary();
+  }
+
   // ============ GRAMMAR PATTERN DETECTION ============
   // Regex-detected recurring patterns, rendered as chips above each sentence
   // they appear in. Ordered so more specific patterns win ties visually.
@@ -159,8 +176,20 @@
   // ============ TOKENIZER (paste-to-learn) ============
   // Greedy longest-match against HSK_DICT + DICT. Punctuation attaches to the
   // previous word to match the existing story word format.
+  //
+  // Translation auto-detection:
+  //   - Line pairs:  odd lines are Chinese, even lines are the translation.
+  //   - Delimiters:  "hz | en" / "hz / en" / "hz — en" on a single line.
+  //   - Otherwise:   Chinese-only, split on sentence terminators.
+  const HAS_CJK = /[\u4e00-\u9fff]/;
   function tokenizeText(text) {
-    // Split on sentence terminators, keeping the terminator attached.
+    const parsed = parseBilingual(text);
+    if (parsed) {
+      return parsed
+        .map(p => ({ en: p.en || "", words: segmentSentence(p.hz) }))
+        .filter(x => x.words.length);
+    }
+    // Chinese-only: split on terminators (keep them attached).
     const rawSentences = [];
     let buf = "";
     for (const ch of text) {
@@ -171,8 +200,62 @@
       }
     }
     if (buf.trim()) rawSentences.push(buf);
+    return rawSentences
+      .map(s => ({ en: "", words: segmentSentence(s.trim()) }))
+      .filter(x => x.words.length);
+  }
+  // Returns [{hz, en}] if a clean bilingual pattern is detected, else null.
+  function parseBilingual(text) {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length);
+    if (lines.length < 2) return null;
 
-    return rawSentences.map(s => ({ en: "", words: segmentSentence(s.trim()) })).filter(x => x.words.length);
+    // Pattern A: single-line delimiter on the majority of lines.
+    const DELIM = /^(.+?)\s*[|｜／\/—–\-]\s*(.+)$/;
+    let delimHits = 0;
+    const delimPairs = [];
+    for (const line of lines) {
+      const m = line.match(DELIM);
+      if (m && HAS_CJK.test(m[1]) && !HAS_CJK.test(m[2])) {
+        delimHits++;
+        delimPairs.push({ hz: m[1].trim(), en: m[2].trim() });
+      } else {
+        delimPairs.push({ hz: line, en: HAS_CJK.test(line) ? "" : "" });
+      }
+    }
+    if (delimHits >= Math.ceil(lines.length * 0.6)) return delimPairs;
+
+    // Pattern B: alternating CJK / non-CJK lines.
+    if (lines.length % 2 === 0) {
+      let ok = true;
+      for (let i = 0; i < lines.length; i += 2) {
+        if (!HAS_CJK.test(lines[i]) || HAS_CJK.test(lines[i + 1])) { ok = false; break; }
+      }
+      if (ok) {
+        const pairs = [];
+        for (let i = 0; i < lines.length; i += 2) pairs.push({ hz: lines[i], en: lines[i + 1] });
+        return pairs;
+      }
+    }
+
+    // Pattern C: most lines are CJK, a minority are pure-English.
+    // Pair each CJK line with the following English line, if any.
+    let cjkCount = 0, enCount = 0;
+    for (const l of lines) {
+      if (HAS_CJK.test(l)) cjkCount++; else enCount++;
+    }
+    if (cjkCount >= 2 && enCount >= 2) {
+      const pairs = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (HAS_CJK.test(lines[i])) {
+          const next = lines[i + 1];
+          if (next && !HAS_CJK.test(next)) { pairs.push({ hz: lines[i], en: next }); i++; }
+          else pairs.push({ hz: lines[i], en: "" });
+        }
+        // Skip stray English lines (titles etc.)
+      }
+      if (pairs.length) return pairs;
+    }
+    return null;
   }
   function segmentSentence(s) {
     const out = [];
@@ -271,6 +354,32 @@
     };
   }
 
+  // All words the user has seen / saved. Combines:
+  //   1. Explicitly saved vocab (state.vocab)
+  //   2. Every word in any fully-read story (last sentence >= total)
+  // Excludes the paste-reader (ephemeral id __paste__).
+  function getKnownSet() {
+    const set = new Set(state.vocab.map(v => v.hz));
+    const allStories = STORIES.concat(state.pasteLibrary || []);
+    for (const id of Object.keys(state.progress)) {
+      if (id === "__paste__") continue;
+      const p = state.progress[id];
+      const story = allStories.find(s => s.id === id);
+      if (!story) continue;
+      const total = p.total || story.sentences.length;
+      if ((p.lastSentence || 0) + 1 < total) continue;
+      for (const s of story.sentences) {
+        for (const w of s.words) {
+          const hz = stripPunct(w.hz);
+          // Only count real dictionary words or multi-char sequences — skip
+          // one-off punctuation tokens / stray ASCII.
+          if (hz && /[\u4e00-\u9fff]/.test(hz)) set.add(hz);
+        }
+      }
+    }
+    return set;
+  }
+
   // Returns the coverage { known, total } of unique dictionary words for a story.
   function storyCoverage(story) {
     const uniq = new Set();
@@ -280,9 +389,9 @@
         if (hz) uniq.add(hz);
       }
     }
-    const savedSet = new Set(state.vocab.map(v => v.hz));
+    const knownSet = getKnownSet();
     let known = 0;
-    for (const hz of uniq) if (savedSet.has(hz)) known++;
+    for (const hz of uniq) if (knownSet.has(hz)) known++;
     return { known, total: uniq.size };
   }
 
@@ -332,6 +441,18 @@
       firebase.firestore().collection("users").doc(currentUser.uid).set({
         inkpathProgress: state.progress,
         inkpathProgressUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }).catch(() => {});
+    }, 800);
+  }
+
+  let cloudPasteTimer = null;
+  function cloudPushPasteLibrary() {
+    if (!hasFirebase || !currentUser) return;
+    clearTimeout(cloudPasteTimer);
+    cloudPasteTimer = setTimeout(() => {
+      firebase.firestore().collection("users").doc(currentUser.uid).set({
+        inkpathPasteLibrary: state.pasteLibrary,
+        inkpathPasteLibraryUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true }).catch(() => {});
     }, 800);
   }
@@ -388,10 +509,23 @@
         localStorage.setItem("inkpath_daily", JSON.stringify(state.daily));
         updateStreakUI();
 
+        // Merge paste library: union by id, prefer newer savedAt.
+        const cloudPasteLib = Array.isArray(data.inkpathPasteLibrary) ? data.inkpathPasteLibrary : [];
+        const pasteMap = new Map();
+        for (const e of cloudPasteLib) if (e && e.id) pasteMap.set(e.id, e);
+        for (const e of state.pasteLibrary || []) {
+          if (!e || !e.id) continue;
+          const existing = pasteMap.get(e.id);
+          if (!existing || (e.savedAt || 0) > (existing.savedAt || 0)) pasteMap.set(e.id, e);
+        }
+        state.pasteLibrary = [...pasteMap.values()];
+        localStorage.setItem("inkpath_paste_library", JSON.stringify(state.pasteLibrary));
+
         setAuthStatus("Synced");
         if (changed) cloudPushVocab();
         cloudPushProgress();
         cloudPushDaily();
+        cloudPushPasteLibrary();
         render();
       })
       .catch(() => setAuthStatus("Offline"));
@@ -407,9 +541,29 @@
     if (!btn) return;
     if (currentUser) {
       const name = currentUser.displayName || currentUser.email || "Signed in";
-      btn.textContent = "Sign out (" + name + ")";
+      const first = (name || "?").trim().charAt(0).toUpperCase();
+      const photo = currentUser.photoURL;
+      btn.className = "auth-chip";
+      btn.innerHTML = `
+        ${photo
+          ? `<img class="auth-avatar" src="${photo}" alt=""/>`
+          : `<span class="auth-avatar auth-avatar-letter">${escapeHtml(first)}</span>`}
+        <span class="auth-name">${escapeHtml(name.split(" ")[0])}</span>
+        <span class="auth-signout-icon" title="Sign out">↪</span>
+      `;
+      btn.title = "Signed in as " + name + " · click to sign out";
     } else {
-      btn.textContent = "Sign in to sync";
+      btn.className = "auth-signin";
+      btn.innerHTML = `
+        <svg class="g-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        <span class="auth-label">Sign in with Google</span>
+      `;
+      btn.title = "Sign in to sync your words across devices";
     }
   }
 
@@ -609,6 +763,7 @@
         <p>Tap any word to see pinyin and meaning. Save words to review later.</p>
       </div>
       ${resume ? renderResumeCard(resume) : ""}
+      ${renderPasteLibrarySection()}
       ${levelSection("Newbie", "newbie", "Simple sentences, basic vocabulary.", byLevel.newbie)}
       ${levelSection("Beginner", "beginner", "Longer passages with common daily vocabulary.", byLevel.beginner)}
       ${levelSection("Intermediate", "intermediate", "More complex grammar and richer vocabulary.", byLevel.intermediate)}
@@ -618,13 +773,84 @@
     });
     const resumeBtn = view.querySelector(".resume-card");
     if (resumeBtn) resumeBtn.addEventListener("click", () => openStory(resumeBtn.dataset.id));
+    view.querySelectorAll(".paste-card .paste-card-remove").forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const id = b.dataset.id;
+        if (!confirm("Delete this saved text?")) return;
+        state.pasteLibrary = state.pasteLibrary.filter(s => s.id !== id);
+        delete state.progress[id];
+        savePasteLibrary();
+        saveProgress();
+        render();
+      };
+    });
+  }
+
+  function renderPasteLibrarySection() {
+    const lib = state.pasteLibrary || [];
+    if (!lib.length) return "";
+    const byCat = {};
+    for (const e of lib) {
+      const k = e.category || "other";
+      (byCat[k] = byCat[k] || []).push(e);
+    }
+    const blocks = PASTE_CATEGORIES
+      .filter(c => byCat[c.key] && byCat[c.key].length)
+      .map(c => {
+        const items = byCat[c.key].slice().sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+        return `
+          <div class="paste-cat">
+            <h3 class="paste-cat-head"><span class="paste-cat-emoji">${c.emoji}</span> ${c.label}
+              <span class="paste-cat-count">${items.length}</span></h3>
+            <div class="story-grid">
+              ${items.map(s => {
+                const total = s.sentences.length;
+                const prog = state.progress[s.id] || {};
+                const read = Math.min((prog.lastSentence || 0) + 1, total);
+                const pct = total ? Math.round((read / total) * 100) : 0;
+                const done = read >= total && read > 0;
+                const started = read > 0 && !done;
+                return `
+                  <div class="story-card paste-card ${done?"done":""} ${started?"in-progress":""}" data-id="${s.id}">
+                    <button class="paste-card-remove" data-id="${s.id}" title="Delete">×</button>
+                    ${done ? `<span class="done-badge">✓ Read</span>` : started ? `<span class="done-badge in-progress">In progress</span>` : ""}
+                    <div class="hz">${escapeHtml(s.title.hz)}</div>
+                    ${s.title.en ? `<div class="en">${escapeHtml(s.title.en)}</div>` : ""}
+                    <div class="desc">${s.description || ""} · ${total} line${total===1?"":"s"}</div>
+                    <div class="coverage">
+                      <div class="coverage-bar"><div style="width:${pct}%"></div></div>
+                      <div class="coverage-label">${done ? "Read · " + total + " lines" : started ? read + " / " + total + " · " + pct + "%" : "Not started"}</div>
+                    </div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          </div>
+        `;
+      }).join("");
+    if (!blocks) return "";
+    return `
+      <section class="level-section paste-library">
+        <div class="level-header">
+          <span class="level-badge paste">Your texts</span>
+          <h2 class="level-title">Saved pastes</h2>
+          <span class="level-desc">Songs, articles, and anything else you've saved.</span>
+        </div>
+        ${blocks}
+      </section>
+    `;
+  }
+  function escapeHtml(s) {
+    return String(s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c]);
   }
 
   function pickResumeStory() {
     let best = null;
+    const allStories = STORIES.concat(state.pasteLibrary || []);
     for (const id of Object.keys(state.progress)) {
       const p = state.progress[id];
-      const story = STORIES.find(s => s.id === id);
+      const story = allStories.find(s => s.id === id);
       if (!story) continue;
       const total = p.total || story.sentences.length;
       if ((p.lastSentence || 0) + 1 >= total) continue; // already finished
@@ -695,13 +921,16 @@
   function renderReader() {
     const story = state.storyId === "__paste__"
       ? state.customStory
-      : STORIES.find(s => s.id === state.storyId);
+      : (STORIES.find(s => s.id === state.storyId)
+         || (state.pasteLibrary || []).find(s => s.id === state.storyId));
     if (!story) { state.route = "library"; return render(); }
 
     const savedSet = new Set(state.vocab.map(v => v.hz));
+    const knownSet = getKnownSet();
     const cov = storyCoverage(story);
     const covPct = cov.total ? Math.round((cov.known / cov.total) * 100) : 0;
 
+    const isPaste = story.id === "__paste__";
     view.innerHTML = `
       <div class="reader-top">
         <button class="back-btn" id="back">← Library</button>
@@ -709,6 +938,7 @@
           ${story.title.hz}
           <span class="py">${story.title.py} · ${story.title.en}</span>
         </h2>
+        ${isPaste ? `<button class="ctrl-btn" id="save-paste">☆ Save to library</button>` : ""}
         <span class="reader-coverage">${cov.known}/${cov.total} known · ${covPct}%</span>
       </div>
       <div id="voice-warning" class="voice-warning" style="display:none">
@@ -744,6 +974,7 @@
                 const classes = ["word"];
                 if (key) {
                   if (savedSet.has(key)) classes.push("saved");
+                  else if (knownSet.has(key)) classes.push("known");
                   else if (dictLookup(key)) classes.push("new");
                   else classes.push("unknown");
                 }
@@ -764,6 +995,8 @@
     refreshVoiceUI();
 
     document.getElementById("back").onclick = () => { state.route = "library"; render(); };
+    const saveBtn = document.getElementById("save-paste");
+    if (saveBtn) saveBtn.onclick = () => openSavePasteDialog(story);
     document.getElementById("tg-py").onchange = e => {
       state.showPinyin = e.target.checked;
       document.getElementById("sentences").classList.toggle("show-pinyin", state.showPinyin);
@@ -876,6 +1109,75 @@
     };
   }
 
+  function openSavePasteDialog(story) {
+    if (!story || !story.sentences || !story.sentences.length) return;
+    // Guess a sensible default title from the first sentence.
+    const firstHz = (story.sentences[0].words || []).map(w => w.hz).join("").slice(0, 20);
+    const defaultTitle = firstHz || "Untitled";
+
+    const wrap = document.createElement("div");
+    wrap.className = "dialog-backdrop";
+    wrap.innerHTML = `
+      <div class="dialog">
+        <h3>Save to library</h3>
+        <label class="dialog-row">
+          <span>Title</span>
+          <input type="text" id="dlg-title" value="${defaultTitle.replace(/"/g, "&quot;")}" maxlength="60"/>
+        </label>
+        <label class="dialog-row">
+          <span>Translation title (optional)</span>
+          <input type="text" id="dlg-title-en" placeholder="English title" maxlength="80"/>
+        </label>
+        <div class="dialog-row">
+          <span>Category</span>
+          <div class="dialog-cats">
+            ${PASTE_CATEGORIES.map((c, i) =>
+              `<button type="button" class="cat-pill ${i === 0 ? "active" : ""}" data-cat="${c.key}">${c.emoji} ${c.label.replace(/s$/, "")}</button>`
+            ).join("")}
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button class="ctrl-btn secondary" id="dlg-cancel">Cancel</button>
+          <button class="ctrl-btn" id="dlg-save">Save</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+
+    let chosenCat = PASTE_CATEGORIES[0].key;
+    wrap.querySelectorAll(".cat-pill").forEach(p => {
+      p.onclick = () => {
+        wrap.querySelectorAll(".cat-pill").forEach(x => x.classList.remove("active"));
+        p.classList.add("active");
+        chosenCat = p.dataset.cat;
+      };
+    });
+    const close = () => wrap.remove();
+    wrap.addEventListener("click", e => { if (e.target === wrap) close(); });
+    wrap.querySelector("#dlg-cancel").onclick = close;
+    wrap.querySelector("#dlg-save").onclick = () => {
+      const title = wrap.querySelector("#dlg-title").value.trim() || defaultTitle;
+      const titleEn = wrap.querySelector("#dlg-title-en").value.trim();
+      const id = "u_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 6);
+      const entry = {
+        id,
+        level: "saved",
+        category: chosenCat,
+        title: { hz: title, py: "", en: titleEn || "Saved text" },
+        description: PASTE_CATEGORIES.find(c => c.key === chosenCat).label.replace(/s$/, ""),
+        sentences: story.sentences,
+        savedAt: Date.now()
+      };
+      state.pasteLibrary = state.pasteLibrary || [];
+      state.pasteLibrary.unshift(entry);
+      savePasteLibrary();
+      close();
+      state.route = "library";
+      render();
+    };
+    setTimeout(() => wrap.querySelector("#dlg-title").focus(), 30);
+  }
+
   // ============ HSK PROGRESS DASHBOARD ============
   function renderHsk() {
     if (!window.HSK_DICT) {
@@ -888,16 +1190,17 @@
       const lvl = window.HSK_DICT[hz].hsk;
       if (lvl >= 1 && lvl <= 6) totals[lvl]++;
     }
-    // Learned per level from saved vocab (fall back to derived level).
+    // Learned per level: every word in the known-set (saved + from finished stories).
     const learned = { 1:0, 2:0, 3:0, 4:0, 5:0, 6:0, other:0 };
-    const savedSet = new Set();
-    for (const w of state.vocab) {
-      savedSet.add(w.hz);
-      let lvl = w.hsk;
-      if (lvl == null) {
-        const d = dictLookup(w.hz);
-        lvl = d ? d.hsk : null;
-      }
+    let savedExplicitCount = 0;
+    let implicitCount = 0;
+    const savedSet = new Set(state.vocab.map(v => v.hz));
+    savedExplicitCount = savedSet.size;
+    const knownSet = getKnownSet();
+    for (const hz of knownSet) {
+      if (!savedSet.has(hz)) implicitCount++;
+      const d = dictLookup(hz);
+      const lvl = d ? d.hsk : null;
       if (lvl >= 1 && lvl <= 6) learned[lvl]++;
       else learned.other++;
     }
@@ -921,6 +1224,11 @@
       <div class="hero">
         <h1>HSK Progress</h1>
         <p>${grandLearned} of ${grandTotal} HSK 1–6 words learned · ${grandPct}% overall</p>
+        <p class="hsk-breakdown">
+          <span>${savedExplicitCount} saved explicitly</span>
+          <span>·</span>
+          <span>${implicitCount} from finished stories</span>
+        </p>
       </div>
       <div class="hsk-grid">${rows}</div>
       ${learned.other ? `<p class="hsk-other-note">Plus ${learned.other} word${learned.other===1?"":"s"} outside HSK 1–6.</p>` : ""}
