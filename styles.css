@@ -417,3 +417,104 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
   text-align: center; padding: 6px 12px;
   font-size: 12px; z-index: 40; letter-spacing: .3px;
 }
+
+/* Global hidden helper — used by streak chip, popup, PWA banners. */
+.hidden { display: none !important; }
+
+/* ---- Streak chip in the top bar ---- */
+.streak {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 13px; font-weight: 700;
+  color: #fff; background: var(--accent);
+  padding: 4px 10px; border-radius: 999px;
+  margin: 0 6px; letter-spacing: .3px;
+  cursor: help;
+}
+.streak.inactive-today {
+  background: transparent; color: var(--muted);
+  border: 1px dashed var(--border);
+}
+
+/* ---- Paste-to-learn ---- */
+.paste-wrap {
+  max-width: 720px; margin: 0 auto;
+}
+.paste-input {
+  width: 100%; resize: vertical;
+  font-family: "Noto Sans SC", -apple-system, system-ui, sans-serif;
+  font-size: 18px; line-height: 1.7;
+  padding: 14px 16px; border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface); color: var(--ink);
+  outline: none;
+}
+.paste-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.paste-actions {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  align-items: center; margin-top: 12px;
+}
+.paste-hint {
+  font-size: 12px; color: var(--muted); margin-left: auto;
+}
+
+/* ---- Grammar pattern chips in the reader ---- */
+.grammar-chips {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px;
+}
+.grammar-chip {
+  font-size: 11px; font-weight: 600;
+  color: var(--intermediate);
+  background: transparent;
+  border: 1px solid var(--intermediate);
+  padding: 2px 8px; border-radius: 999px;
+  letter-spacing: .3px; cursor: help;
+  opacity: .75;
+}
+.grammar-chip:hover { opacity: 1; background: var(--accent-soft); }
+
+/* ---- HSK dashboard ---- */
+.hsk-grid {
+  display: flex; flex-direction: column; gap: 12px;
+  max-width: 720px; margin: 0 auto;
+}
+.hsk-row {
+  display: grid;
+  grid-template-columns: 70px 1fr auto auto;
+  align-items: center; gap: 12px;
+  padding: 10px 14px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.hsk-row-badge { margin: 0; }
+.hsk-row-bar {
+  height: 10px; background: var(--border);
+  border-radius: 999px; overflow: hidden;
+}
+.hsk-row-bar > div {
+  height: 100%; transition: width .4s ease;
+}
+.hsk-row-bar > div.hsk-1 { background: var(--hsk1); }
+.hsk-row-bar > div.hsk-2 { background: var(--hsk2); }
+.hsk-row-bar > div.hsk-3 { background: var(--hsk3); }
+.hsk-row-bar > div.hsk-4 { background: var(--hsk4); }
+.hsk-row-bar > div.hsk-5 { background: var(--hsk5); }
+.hsk-row-bar > div.hsk-6 { background: var(--hsk6); }
+.hsk-row-count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hsk-row-pct { font-size: 13px; font-weight: 700; color: var(--ink); min-width: 40px; text-align: right; }
+.hsk-other-note { text-align: center; color: var(--muted); font-size: 13px; margin-top: 14px; }
+
+/* ---- Vocab card: saved-with-context ---- */
+.vocab-context {
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.vocab-context-hz {
+  font-size: 14px; color: var(--ink); line-height: 1.5;
+}
+.vocab-context-hz mark {
+  background: var(--word-saved-bg); color: inherit;
+  padding: 0 2px; border-radius: 3px;
+}
+.vocab-context-en {
+  font-size: 12px; color: var(--muted); margin-top: 3px;
+}

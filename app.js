@@ -45,11 +45,172 @@
     showTranslation: false,
     activeSentence: -1,
     currentWord: null,
+    currentSentence: null,       // for save-with-context
+    customStory: loadCustomStory(), // user-pasted text
     vocab: loadVocab(),
     progress: loadProgress(),
+    daily: loadDaily(),
     rate: parseFloat(localStorage.getItem("duchinese_rate") || "0.9"),
     voiceName: localStorage.getItem("duchinese_voice") || ""
   };
+
+  function loadDaily() {
+    try { return JSON.parse(localStorage.getItem("inkpath_daily") || "{}"); }
+    catch { return {}; }
+  }
+  function saveDaily() {
+    localStorage.setItem("inkpath_daily", JSON.stringify(state.daily));
+    cloudPushDaily();
+  }
+  function todayKey() {
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function bumpDaily(kind) {
+    const k = todayKey();
+    const day = state.daily[k] || { read: 0, saved: 0 };
+    if (kind === "read") day.read += 1;
+    else if (kind === "saved") day.saved += 1;
+    state.daily[k] = day;
+    saveDaily();
+    updateStreakUI();
+  }
+  function computeStreak() {
+    const days = Object.keys(state.daily).sort();
+    if (!days.length) return 0;
+    const d = new Date();
+    let streak = 0;
+    while (true) {
+      const k = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+      const day = state.daily[k];
+      const active = day && ((day.read || 0) > 0 || (day.saved || 0) > 0);
+      if (active) {
+        streak += 1;
+        d.setDate(d.getDate() - 1);
+      } else {
+        // Allow today to be empty and still count current streak (don't break on today itself)
+        if (streak === 0 && k === todayKey()) { d.setDate(d.getDate() - 1); continue; }
+        break;
+      }
+    }
+    return streak;
+  }
+  function updateStreakUI() {
+    const el = document.getElementById("streak");
+    if (!el) return;
+    const n = computeStreak();
+    const today = state.daily[todayKey()] || { read: 0, saved: 0 };
+    const active = (today.read || 0) > 0 || (today.saved || 0) > 0;
+    if (n <= 0) { el.classList.add("hidden"); return; }
+    el.classList.remove("hidden");
+    el.classList.toggle("inactive-today", !active);
+    el.textContent = "🔥 " + n;
+    el.title = "Streak: " + n + " day" + (n === 1 ? "" : "s") +
+      (active ? " · today: " + (today.read||0) + " read, " + (today.saved||0) + " saved"
+              : " · keep it alive — read a sentence or save a word today");
+  }
+
+  function loadCustomStory() {
+    try { return JSON.parse(localStorage.getItem("inkpath_paste") || "null"); }
+    catch { return null; }
+  }
+  function saveCustomStory() {
+    if (state.customStory) localStorage.setItem("inkpath_paste", JSON.stringify(state.customStory));
+    else localStorage.removeItem("inkpath_paste");
+  }
+
+  // ============ GRAMMAR PATTERN DETECTION ============
+  // Regex-detected recurring patterns, rendered as chips above each sentence
+  // they appear in. Ordered so more specific patterns win ties visually.
+  const GRAMMAR_PATTERNS = [
+    { re: /虽然[^。！？]*?但是/, label: "虽然…但是", note: "although … but — concessive pair" },
+    { re: /不但[^。！？]*?而且/, label: "不但…而且", note: "not only … but also" },
+    { re: /因为[^。！？]*?所以/, label: "因为…所以", note: "because … therefore" },
+    { re: /如果[^。！？]*?就/, label: "如果…就", note: "if … then" },
+    { re: /一边[^。！？]*?一边/, label: "一边…一边", note: "doing two things at once" },
+    { re: /越[^。！？]+?越/, label: "越…越", note: "the more … the more" },
+    { re: /又[^。！？]+?又/, label: "又…又", note: "both … and" },
+    { re: /比[^。！？]+?[得的]多/, label: "比…得多", note: "much more than — comparison" },
+    { re: /比[^。！？]+?一点/, label: "比…一点", note: "a little more than" },
+    { re: /[^。！？]*?比[^，。！？]+?[高大小多少好快慢长短冷热]/, label: "A 比 B …", note: "A is more … than B" },
+    { re: /是[^。！？]+?的[。！？!?]?$/, label: "是…的", note: "emphasis on time, place, or manner" },
+    { re: /把[^，。！？]{1,10}?[放送给交带拿吃喝写看听做买卖开关]/, label: "把 construction", note: "subject does V to this object" },
+    { re: /被[^，。！？]{0,6}?[打骂吃喝看见抓]/, label: "被 construction", note: "passive — subject is V-ed" },
+    { re: /[^。！？]+?[了过着]$/, label: "aspect marker", note: "了 / 过 / 着 — completed / experienced / ongoing" },
+    { re: /[吗呢吧啊]\?|[吗呢吧啊][。！？]?$/, label: "question particle", note: "吗 / 呢 / 吧 softens or asks" },
+    { re: /一[^。！？]{1,2}?就/, label: "一…就", note: "as soon as … then" },
+    { re: /连[^。！？]+?都/, label: "连…都", note: "even … (emphatic)" },
+    { re: /除了[^。！？]+?[以之]外/, label: "除了…以外", note: "besides / except" },
+    { re: /[多么真好]+[^。！？]+?[啊呀]/, label: "exclamation", note: "emphatic exclamation" }
+  ];
+  function detectPatterns(sentenceHz) {
+    const hits = [];
+    const seen = new Set();
+    for (const p of GRAMMAR_PATTERNS) {
+      if (p.re.test(sentenceHz) && !seen.has(p.label)) {
+        seen.add(p.label);
+        hits.push(p);
+        if (hits.length >= 3) break;
+      }
+    }
+    return hits;
+  }
+
+  // ============ TOKENIZER (paste-to-learn) ============
+  // Greedy longest-match against HSK_DICT + DICT. Punctuation attaches to the
+  // previous word to match the existing story word format.
+  function tokenizeText(text) {
+    // Split on sentence terminators, keeping the terminator attached.
+    const rawSentences = [];
+    let buf = "";
+    for (const ch of text) {
+      buf += ch;
+      if (/[。！？!?.\n]/.test(ch)) {
+        if (buf.trim()) rawSentences.push(buf);
+        buf = "";
+      }
+    }
+    if (buf.trim()) rawSentences.push(buf);
+
+    return rawSentences.map(s => ({ en: "", words: segmentSentence(s.trim()) })).filter(x => x.words.length);
+  }
+  function segmentSentence(s) {
+    const out = [];
+    const MAX = 5;
+    let i = 0;
+    while (i < s.length) {
+      const ch = s[i];
+      // Whitespace: skip
+      if (/\s/.test(ch)) { i++; continue; }
+      // Punctuation: attach to previous word
+      if (/[。，、；：！？“”‘’（）《》——,.!?;:"'()\[\]{}—]/.test(ch)) {
+        if (out.length) out[out.length - 1].hz += ch;
+        else out.push({ hz: ch, py: "", en: "" });
+        i++;
+        continue;
+      }
+      // CJK: greedy longest match
+      if (/[\u4e00-\u9fff]/.test(ch)) {
+        let matched = null;
+        for (let len = Math.min(MAX, s.length - i); len >= 1; len--) {
+          const cand = s.substr(i, len);
+          if (!/^[\u4e00-\u9fff]+$/.test(cand)) continue;
+          const d = dictLookup(cand);
+          if (d) { matched = { hz: cand, py: d.py || "", en: d.en || "" }; break; }
+        }
+        if (!matched) matched = { hz: ch, py: "", en: "" };
+        out.push(matched);
+        i += matched.hz.length;
+        continue;
+      }
+      // ASCII/other: keep as its own token
+      let j = i + 1;
+      while (j < s.length && !/[\s。，、；：！？,.!?;:"'()\[\]{}\u4e00-\u9fff]/.test(s[j])) j++;
+      out.push({ hz: s.substr(i, j - i), py: "", en: "" });
+      i = j;
+    }
+    return out;
+  }
 
   function loadProgress() {
     try { return JSON.parse(localStorage.getItem("inkpath_progress") || "{}"); }
@@ -60,6 +221,8 @@
     cloudPushProgress();
   }
   function markRead(storyId, sentenceIndex, total) {
+    // Don't record paste-story progress — it's ephemeral.
+    if (storyId === "__paste__") { bumpDaily("read"); return; }
     const prev = state.progress[storyId] || {};
     const next = {
       lastSentence: Math.max(prev.lastSentence || 0, sentenceIndex),
@@ -68,6 +231,7 @@
     };
     state.progress[storyId] = next;
     saveProgress();
+    bumpDaily("read");
   }
 
   // Unified dictionary lookup: flashcards HSK data wins for examples/HSK,
@@ -172,6 +336,18 @@
     }, 800);
   }
 
+  let cloudDailyTimer = null;
+  function cloudPushDaily() {
+    if (!hasFirebase || !currentUser) return;
+    clearTimeout(cloudDailyTimer);
+    cloudDailyTimer = setTimeout(() => {
+      firebase.firestore().collection("users").doc(currentUser.uid).set({
+        inkpathDaily: state.daily,
+        inkpathDailyUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }).catch(() => {});
+    }, 800);
+  }
+
   function cloudPullVocab() {
     if (!hasFirebase || !currentUser) return;
     setAuthStatus("Loading…");
@@ -197,9 +373,25 @@
         state.progress = mergedProg;
         localStorage.setItem("inkpath_progress", JSON.stringify(state.progress));
 
+        // Merge daily stats: sum counts per date.
+        const cloudDaily = data.inkpathDaily && typeof data.inkpathDaily === "object" ? data.inkpathDaily : {};
+        const mergedDaily = Object.assign({}, cloudDaily);
+        for (const k of Object.keys(state.daily)) {
+          const a = mergedDaily[k] || { read: 0, saved: 0 };
+          const b = state.daily[k] || { read: 0, saved: 0 };
+          mergedDaily[k] = {
+            read: Math.max(a.read || 0, b.read || 0),
+            saved: Math.max(a.saved || 0, b.saved || 0)
+          };
+        }
+        state.daily = mergedDaily;
+        localStorage.setItem("inkpath_daily", JSON.stringify(state.daily));
+        updateStreakUI();
+
         setAuthStatus("Synced");
         if (changed) cloudPushVocab();
         cloudPushProgress();
+        cloudPushDaily();
         render();
       })
       .catch(() => setAuthStatus("Offline"));
@@ -271,6 +463,17 @@
 
   function stripPunct(s) {
     return s.replace(/[。，！？、,.!?;:"'\s]/g, "");
+  }
+
+  // Wrap each occurrence of `needle` inside `hay` with <mark> so the saved
+  // word pops out of its context sentence in the Vocabulary list.
+  function highlightInContext(hay, needle) {
+    if (!hay) return "";
+    const esc = (s) => s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c]);
+    if (!needle) return esc(hay);
+    const h = esc(hay);
+    const n = esc(needle).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return h.replace(new RegExp(n, "g"), `<mark>${esc(needle)}</mark>`);
   }
 
   // ============ SPEECH SYNTHESIS ============
@@ -382,9 +585,12 @@
   // ============ RENDER ============
   function render() {
     hidePopup();
+    updateStreakUI();
     if (state.route === "library") renderLibrary();
     else if (state.route === "reader") renderReader();
     else if (state.route === "vocab") renderVocab();
+    else if (state.route === "paste") renderPaste();
+    else if (state.route === "hsk") renderHsk();
   }
 
   function renderLibrary() {
@@ -487,7 +693,9 @@
   }
 
   function renderReader() {
-    const story = STORIES.find(s => s.id === state.storyId);
+    const story = state.storyId === "__paste__"
+      ? state.customStory
+      : STORIES.find(s => s.id === state.storyId);
     if (!story) { state.route = "library"; return render(); }
 
     const savedSet = new Set(state.vocab.map(v => v.hz));
@@ -522,8 +730,14 @@
         </label>
       </div>
       <div id="sentences" class="${state.showPinyin?"show-pinyin":""} ${state.showTranslation?"show-translation":""}">
-        ${story.sentences.map((s, i) => `
+        ${story.sentences.map((s, i) => {
+          const sentHz = s.words.map(w => w.hz).join("");
+          const patterns = detectPatterns(sentHz);
+          return `
           <div class="sentence" data-i="${i}">
+            ${patterns.length ? `<div class="grammar-chips">${patterns.map(p =>
+              `<span class="grammar-chip" title="${p.note}">${p.label}</span>`
+            ).join("")}</div>` : ""}
             <div class="hz-line">
               ${s.words.map((w, j) => {
                 const key = stripPunct(w.hz);
@@ -542,7 +756,8 @@
             </div>
             <div class="en-line">${s.en}</div>
           </div>
-        `).join("")}
+        `;
+        }).join("")}
       </div>
     `;
 
@@ -583,6 +798,7 @@
       el.addEventListener("click", (e) => {
         e.stopPropagation();
         const i = +el.dataset.i, j = +el.dataset.j;
+        state.currentSentence = story.sentences[i];
         showWordPopup(story.sentences[i].words[j], el);
       });
     });
@@ -607,6 +823,108 @@
       const target = view.querySelector(`.sentence[data-i="${prog.lastSentence}"]`);
       if (target) requestAnimationFrame(() => target.scrollIntoView({ behavior: "instant", block: "center" }));
     }
+  }
+
+  // ============ PASTE-TO-LEARN ============
+  function renderPaste() {
+    const draft = (state.customStory && state.customStory.__raw) || "";
+    view.innerHTML = `
+      <div class="hero">
+        <h1>Paste any Chinese text</h1>
+        <p>Drop in an article, song, menu, or chat. We'll segment it into tappable words.</p>
+      </div>
+      <div class="paste-wrap">
+        <textarea id="paste-input" class="paste-input" rows="10"
+          placeholder="粘贴任何中文文本…"
+          spellcheck="false">${draft.replace(/</g, "&lt;")}</textarea>
+        <div class="paste-actions">
+          <button id="paste-go" class="ctrl-btn">Segment &amp; read →</button>
+          ${state.customStory ? `<button id="paste-reopen" class="ctrl-btn secondary">Reopen last</button>` : ""}
+          <button id="paste-clear" class="ctrl-btn secondary">Clear</button>
+          <span class="paste-hint">Tip: any unrecognized word falls back to single-character lookup.</span>
+        </div>
+      </div>
+    `;
+    const input = document.getElementById("paste-input");
+    document.getElementById("paste-go").onclick = () => {
+      const raw = (input.value || "").trim();
+      if (!raw) return;
+      const sentences = tokenizeText(raw);
+      if (!sentences.length) return;
+      state.customStory = {
+        id: "__paste__",
+        level: "paste",
+        __raw: raw,
+        title: { hz: "我的文本", py: "Wǒ de wénběn", en: "Your pasted text" },
+        description: "Tokenized from pasted text.",
+        sentences
+      };
+      saveCustomStory();
+      state.route = "reader";
+      state.storyId = "__paste__";
+      render();
+    };
+    const re = document.getElementById("paste-reopen");
+    if (re) re.onclick = () => {
+      state.route = "reader"; state.storyId = "__paste__"; render();
+    };
+    document.getElementById("paste-clear").onclick = () => {
+      input.value = "";
+      state.customStory = null;
+      saveCustomStory();
+      render();
+    };
+  }
+
+  // ============ HSK PROGRESS DASHBOARD ============
+  function renderHsk() {
+    if (!window.HSK_DICT) {
+      view.innerHTML = `<div class="hero"><h1>HSK Progress</h1><p>Dictionary not loaded.</p></div>`;
+      return;
+    }
+    // Totals per HSK level from the dictionary.
+    const totals = { 1:0, 2:0, 3:0, 4:0, 5:0, 6:0 };
+    for (const hz of Object.keys(window.HSK_DICT)) {
+      const lvl = window.HSK_DICT[hz].hsk;
+      if (lvl >= 1 && lvl <= 6) totals[lvl]++;
+    }
+    // Learned per level from saved vocab (fall back to derived level).
+    const learned = { 1:0, 2:0, 3:0, 4:0, 5:0, 6:0, other:0 };
+    const savedSet = new Set();
+    for (const w of state.vocab) {
+      savedSet.add(w.hz);
+      let lvl = w.hsk;
+      if (lvl == null) {
+        const d = dictLookup(w.hz);
+        lvl = d ? d.hsk : null;
+      }
+      if (lvl >= 1 && lvl <= 6) learned[lvl]++;
+      else learned.other++;
+    }
+    const grandTotal = Object.values(totals).reduce((a,b)=>a+b, 0);
+    const grandLearned = learned[1]+learned[2]+learned[3]+learned[4]+learned[5]+learned[6];
+    const grandPct = grandTotal ? Math.round(grandLearned / grandTotal * 100) : 0;
+
+    const rows = [1,2,3,4,5,6].map(l => {
+      const pct = totals[l] ? Math.round(learned[l] / totals[l] * 100) : 0;
+      return `
+        <div class="hsk-row">
+          <span class="hsk-row-badge hsk-badge hsk-${l}">HSK ${l}</span>
+          <div class="hsk-row-bar"><div class="hsk-${l}" style="width:${pct}%"></div></div>
+          <span class="hsk-row-count">${learned[l]} / ${totals[l]}</span>
+          <span class="hsk-row-pct">${pct}%</span>
+        </div>
+      `;
+    }).join("");
+
+    view.innerHTML = `
+      <div class="hero">
+        <h1>HSK Progress</h1>
+        <p>${grandLearned} of ${grandTotal} HSK 1–6 words learned · ${grandPct}% overall</p>
+      </div>
+      <div class="hsk-grid">${rows}</div>
+      ${learned.other ? `<p class="hsk-other-note">Plus ${learned.other} word${learned.other===1?"":"s"} outside HSK 1–6.</p>` : ""}
+    `;
   }
 
   function renderVocab() {
@@ -658,6 +976,12 @@
       <div class="vocab-list">
         ${filtered.map((w) => {
           const idx = state.vocab.indexOf(w);
+          const ctx = w.context && w.context.hz
+            ? `<div class="vocab-context">
+                 <div class="vocab-context-hz">${highlightInContext(w.context.hz, w.hz)}</div>
+                 ${w.context.en ? `<div class="vocab-context-en">${w.context.en}</div>` : ""}
+               </div>`
+            : "";
           return `
             <div class="vocab-item">
               <button class="remove" data-idx="${idx}" title="Remove">×</button>
@@ -665,6 +989,7 @@
               <div class="hz">${w.hz}</div>
               <div class="py">${w.py || ""}</div>
               <div class="en">${w.en || ""}</div>
+              ${ctx}
             </div>
           `;
         }).join("")}
@@ -747,8 +1072,19 @@
     if (!state.currentWord) return;
     const w = state.currentWord;
     const i = state.vocab.findIndex(v => v.hz === w.hz);
-    if (i >= 0) state.vocab.splice(i, 1);
-    else state.vocab.push({ hz: w.hz, py: w.py, en: w.en, hsk: w.hsk || null });
+    if (i >= 0) {
+      state.vocab.splice(i, 1);
+    } else {
+      const entry = { hz: w.hz, py: w.py, en: w.en, hsk: w.hsk || null, savedAt: Date.now() };
+      // Attach the sentence this word came from, for later review context.
+      if (state.currentSentence) {
+        const ctxHz = state.currentSentence.words.map(x => x.hz).join("");
+        entry.context = { hz: ctxHz, en: state.currentSentence.en || "" };
+        if (state.storyId) entry.src = { storyId: state.storyId };
+      }
+      state.vocab.push(entry);
+      bumpDaily("saved");
+    }
     saveVocab();
     const saved = state.vocab.some(v => v.hz === w.hz);
     popupSave.textContent = saved ? "★ Saved" : "☆ Save word";
