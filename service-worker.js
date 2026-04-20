@@ -6,7 +6,7 @@
 //     once cached, but updates silently in the background when online.
 //   - Everything else: cache-first, fall back to network, then index.html if HTML.
 
-const VERSION = "v9";
+const VERSION = "v10";
 const APP_CACHE = "inkpath-app-" + VERSION;
 const RUNTIME_CACHE = "inkpath-runtime-" + VERSION;
 
@@ -21,7 +21,9 @@ const APP_SHELL = [
   "./data/hsk-dict.js",
   "./data/stories.js",
   "./data/stories-extra.js",
-  "./data/stories-curated.js"
+  "./data/stories-curated.js",
+  "./data/stories-volume-2.js",
+  "./data/daily-news.js"
 ];
 
 self.addEventListener("install", (event) => {

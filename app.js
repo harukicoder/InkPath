@@ -52,6 +52,7 @@
     progress: loadProgress(),
     daily: loadDaily(),
     sessions: loadSessions(),     // [{startedAt, endedAt, chars, sentences, storyId, storyTitle}]
+    levelFilter: localStorage.getItem("inkpath_level_filter") || "all",
     rate: parseFloat(localStorage.getItem("duchinese_rate") || "0.9"),
     voiceName: localStorage.getItem("duchinese_voice") || "",
     _prevRoute: null
@@ -1004,23 +1005,48 @@
 
     // Pick the most-recently-touched in-progress story (not yet finished)
     const resume = pickResumeStory();
+    const filter = state.levelFilter || "all";
+    const counts = {
+      all: byLevel.newbie.length + byLevel.beginner.length + byLevel.intermediate.length,
+      newbie: byLevel.newbie.length,
+      beginner: byLevel.beginner.length,
+      intermediate: byLevel.intermediate.length
+    };
+    const pill = (key, label) =>
+      `<button class="lvl-pill ${filter === key ? "active" : ""}" data-level="${key}">${label} <span class="lvl-count">${counts[key]}</span></button>`;
 
     view.innerHTML = `
       <div class="hero">
         <h1>Learn Mandarin through stories</h1>
         <p>Tap any word to see pinyin and meaning. Save words to review later.</p>
       </div>
+      ${renderDailyNewsCard()}
       ${resume ? renderResumeCard(resume) : ""}
       ${renderPasteLibrarySection()}
-      ${levelSection("Newbie", "newbie", "Simple sentences, basic vocabulary.", byLevel.newbie)}
-      ${levelSection("Beginner", "beginner", "Longer passages with common daily vocabulary.", byLevel.beginner)}
-      ${levelSection("Intermediate", "intermediate", "More complex grammar and richer vocabulary.", byLevel.intermediate)}
+      <div class="level-filter" role="tablist">
+        ${pill("all", "All")}
+        ${pill("newbie", "Newbie")}
+        ${pill("beginner", "Beginner")}
+        ${pill("intermediate", "Intermediate")}
+      </div>
+      ${(filter === "all" || filter === "newbie")      ? levelSection("Newbie", "newbie", "Simple sentences, basic vocabulary.", byLevel.newbie) : ""}
+      ${(filter === "all" || filter === "beginner")    ? levelSection("Beginner", "beginner", "Longer passages with common daily vocabulary.", byLevel.beginner) : ""}
+      ${(filter === "all" || filter === "intermediate")? levelSection("Intermediate", "intermediate", "More complex grammar and richer vocabulary.", byLevel.intermediate) : ""}
     `;
     view.querySelectorAll(".story-card").forEach(card => {
       card.addEventListener("click", () => openStory(card.dataset.id));
     });
+    view.querySelectorAll(".lvl-pill").forEach(p => {
+      p.onclick = () => {
+        state.levelFilter = p.dataset.level;
+        localStorage.setItem("inkpath_level_filter", state.levelFilter);
+        render();
+      };
+    });
     const resumeBtn = view.querySelector(".resume-card");
     if (resumeBtn) resumeBtn.addEventListener("click", () => openStory(resumeBtn.dataset.id));
+    const dnCard = view.querySelector(".daily-news-card");
+    if (dnCard) dnCard.addEventListener("click", () => openStory(dnCard.dataset.id));
     view.querySelectorAll(".paste-card .paste-card-remove").forEach(b => {
       b.onclick = (e) => {
         e.stopPropagation();
@@ -1061,6 +1087,7 @@
                 const started = read > 0 && !done;
                 return `
                   <div class="story-card paste-card ${done?"done":""} ${started?"in-progress":""}" data-id="${s.id}">
+                    ${renderStoryCover(s)}
                     <button class="paste-card-remove" data-id="${s.id}" title="Delete">×</button>
                     ${done ? `<span class="done-badge">✓ Read</span>` : started ? `<span class="done-badge in-progress">In progress</span>` : ""}
                     <div class="hz">${escapeHtml(s.title.hz)}</div>
@@ -1093,6 +1120,64 @@
     return String(s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c]);
   }
 
+  // ============ STORY COVERS ============
+  // Generated inline as a CSS gradient + the first 1–2 hanzi of the title, so
+  // we don't ship image assets and covers keep working offline. Gradients are
+  // picked deterministically from a 12-slot palette via a stable hash.
+  const COVER_GRADIENTS = [
+    ["#ffecd2", "#fcb69f"], // peach
+    ["#a1c4fd", "#c2e9fb"], // sky
+    ["#d4fc79", "#96e6a1"], // spring
+    ["#fbc2eb", "#a6c1ee"], // lilac
+    ["#ffd1ff", "#fad0c4"], // blush
+    ["#c1dfc4", "#deecdd"], // sage
+    ["#f6d365", "#fda085"], // sunset
+    ["#fdcbf1", "#e6dee9"], // rose quartz
+    ["#84fab0", "#8fd3f4"], // mint
+    ["#ffb199", "#ff0844"], // coral
+    ["#c471f5", "#fa71cd"], // violet
+    ["#4facfe", "#00f2fe"]  // ocean
+  ];
+  // Topic → emoji overrides (applied by matching story title, id, or keywords).
+  const COVER_EMOJI = {
+    家: "🏠", 茶: "🍵", 饭: "🍚", 餐: "🍽", 菜: "🥬", 吃: "🍜",
+    书: "📚", 学: "📖", 老师: "👩‍🏫", 课: "📖", 图书馆: "📚", 作业: "✏️",
+    车: "🚌", 飞机: "✈️", 火车: "🚆", 旅行: "🧳", 地图: "🗺",
+    医生: "🩺", 病: "🩺", 药: "💊", 身体: "💪", 健身: "🏋️", 运动: "🏃",
+    钱: "💴", 银行: "🏦", 工作: "💼", 面试: "💼", 公司: "🏢",
+    朋友: "🧑‍🤝‍🧑", 家人: "👨‍👩‍👧", 生日: "🎂", 结婚: "💍",
+    天气: "🌤", 雨: "🌧", 雪: "❄️", 春: "🌸", 夏: "☀️", 秋: "🍂", 冬: "⛄",
+    电话: "📞", 网: "🌐", 购物: "🛒", 超市: "🛒", 电影: "🎬", 音乐: "🎵",
+    新闻: "📰", 经济: "📈",
+    梦: "✨", 信: "✉️", 城市: "🏙", 节: "🎉", 春节: "🧧", 中秋: "🌕"
+  };
+  function hashStr(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }
+  function pickCoverEmoji(story) {
+    if (story.cover && story.cover.emoji) return story.cover.emoji;
+    const hay = (story.title && story.title.hz || "") + (story.description || "");
+    for (const k of Object.keys(COVER_EMOJI)) {
+      if (hay.includes(k)) return COVER_EMOJI[k];
+    }
+    return "";
+  }
+  function renderStoryCover(story) {
+    const [a, b] = COVER_GRADIENTS[hashStr(story.id) % COVER_GRADIENTS.length];
+    const emoji = pickCoverEmoji(story);
+    const hz = (story.title && story.title.hz) || "";
+    // Take up to the first 2 hanzi for the big glyph
+    const bigChars = [...hz].filter(c => /[\u4e00-\u9fff]/.test(c)).slice(0, 2).join("");
+    return `
+      <div class="story-cover" style="background:linear-gradient(135deg, ${a}, ${b})">
+        <span class="cover-hz">${escapeHtml(bigChars || hz.slice(0, 2))}</span>
+        ${emoji ? `<span class="cover-emoji" aria-hidden="true">${emoji}</span>` : ""}
+      </div>
+    `;
+  }
+
   function pickResumeStory() {
     let best = null;
     const allStories = STORIES.concat(state.pasteLibrary || []);
@@ -1107,6 +1192,51 @@
       }
     }
     return best;
+  }
+
+  // ============ DAILY NEWS (AI-generated, HSK ≤ 4) ============
+  // A GitHub Action regenerates window.DAILY_NEWS each day — see
+  // .github/workflows/daily-news.yml. The client just renders whatever is
+  // in data/daily-news.js. Missing / stale file → no card shown.
+  function getDailyNewsStory() {
+    const n = typeof window !== "undefined" ? window.DAILY_NEWS : null;
+    if (!n || !n.sentences || !n.sentences.length) return null;
+    // Ensure it has the shape renderReader expects.
+    return Object.assign({
+      id: "news-" + (n.date || "today"),
+      level: "news",
+      title: {
+        hz: n.title && n.title.hz || "今日中国新闻",
+        py: n.title && n.title.py || "Jīnrì Zhōngguó xīnwén",
+        en: n.title && n.title.en || "Today's China brief"
+      },
+      description: n.description || "AI-generated news + economy brief · HSK ≤ 4"
+    }, n);
+  }
+  function renderDailyNewsCard() {
+    const story = getDailyNewsStory();
+    if (!story) return "";
+    // Register it so renderReader can find it by id.
+    if (!STORIES.some(s => s.id === story.id)) STORIES.push(story);
+    const prog = state.progress[story.id] || {};
+    const total = story.sentences.length;
+    const read = Math.min((prog.lastSentence || 0) + 1, total);
+    const pct = total ? Math.round((read / total) * 100) : 0;
+    const done = read >= total && read > 0;
+    const dateLabel = story.date || "";
+    return `
+      <section class="daily-news-section">
+        <div class="daily-news-card" data-id="${story.id}">
+          <div class="dn-cover">📰</div>
+          <div class="dn-body">
+            <div class="dn-kicker">Today's brief · HSK ≤ 4${dateLabel ? " · " + dateLabel : ""}</div>
+            <div class="dn-title">${escapeHtml(story.title.hz)}</div>
+            <div class="dn-sub">${escapeHtml(story.title.en)}</div>
+            <div class="dn-meta">${total} sentence${total===1?"":"s"}${done ? " · ✓ Read" : read ? " · " + pct + "%" : ""}</div>
+          </div>
+        </div>
+      </section>
+    `;
   }
 
   function renderResumeCard(r) {
@@ -1149,6 +1279,7 @@
                 : "Not started";
             return `
               <div class="story-card ${done ? "done" : ""} ${started && !done ? "in-progress" : ""}" data-id="${s.id}">
+                ${renderStoryCover(s)}
                 ${done ? `<span class="done-badge">✓ Read</span>` : started ? `<span class="done-badge in-progress">In progress</span>` : ""}
                 <div class="hz">${s.title.hz}</div>
                 <div class="py">${s.title.py}</div>
