@@ -178,47 +178,15 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 }
 .story-card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 12px; padding: 0; cursor: pointer;
-  overflow: hidden;
+  border-radius: 12px; padding: 16px 18px; cursor: pointer;
   transition: transform .12s ease, box-shadow .12s ease;
-  display: flex; flex-direction: column;
+  display: flex; flex-direction: column; position: relative;
 }
 .story-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
-.story-card > .hz,
-.story-card > .py,
-.story-card > .en,
-.story-card > .desc,
-.story-card > .coverage { padding-left: 18px; padding-right: 18px; }
-.story-card > .hz  { font-size: 22px; font-weight: 600; margin: 14px 0 2px; }
+.story-card > .hz  { font-size: 22px; font-weight: 600; margin: 0 0 2px; }
 .story-card > .py  { font-size: 13px; color: var(--muted); }
 .story-card > .en  { font-size: 14px; color: var(--ink); margin-top: 6px; }
 .story-card > .desc { font-size: 13px; color: var(--muted); margin: 10px 0 12px; flex: 1; }
-.story-card > .coverage { padding-bottom: 14px; }
-
-/* Cover art: gradient + oversized hanzi + optional emoji accent */
-.story-cover {
-  position: relative;
-  aspect-ratio: 16 / 9;
-  display: flex; align-items: center; justify-content: center;
-  overflow: hidden;
-  letter-spacing: -0.02em;
-}
-.story-cover .cover-hz {
-  font-family: "Noto Serif SC", "Noto Sans SC", serif;
-  font-size: clamp(44px, 9vw, 76px);
-  font-weight: 700;
-  color: rgba(20, 15, 10, 0.78);
-  text-shadow: 0 1px 0 rgba(255,255,255,0.4);
-  line-height: 1;
-  user-select: none;
-}
-.story-cover .cover-emoji {
-  position: absolute;
-  top: 10px; right: 12px;
-  font-size: 22px;
-  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.15));
-}
-:root[data-theme="dark"] .story-cover .cover-hz { color: rgba(10, 8, 5, 0.82); }
 
 /* ---- Level filter pills ---- */
 .level-filter {
@@ -332,6 +300,20 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
   font-size: 13px; color: var(--ink);
 }
 .rate-picker input[type="range"] { width: 100px; }
+.zoom-picker {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--ink);
+}
+.zoom-picker input[type="range"] { width: 100px; }
+.zoom-btn {
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border);
+  padding: 4px 8px; border-radius: 6px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  min-width: 30px;
+}
+.zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
+#zoom-val { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
 .controls .spacer { flex: 1; }
 .voice-warning {
   font-size: 13px; color: var(--accent);
@@ -345,8 +327,11 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 }
 .sentence:hover { background: var(--accent-soft); }
 .sentence.active { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+/* Reader zoom: everything inside #sentences scales off --reader-scale so the
+   zoom slider in the toolbar resizes hanzi / pinyin / English in lockstep. */
+#sentences { --reader-scale: 1; }
 .sentence .hz-line {
-  font-size: 24px; line-height: 2.4; letter-spacing: 1px;
+  font-size: calc(24px * var(--reader-scale)); line-height: 2.4; letter-spacing: 1px;
 }
 .word {
   display: inline-flex; flex-direction: column; align-items: center;
@@ -356,12 +341,12 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 .word:hover { background: #ffe4b5; }
 .word.saved { background: #fff3cd; }
 .word .w-py {
-  font-size: 11px; color: var(--muted); line-height: 1;
+  font-size: calc(11px * var(--reader-scale)); color: var(--muted); line-height: 1;
   min-height: 0; opacity: 0; transition: opacity .15s;
 }
-.show-pinyin .word .w-py { opacity: 1; min-height: 14px; }
+.show-pinyin .word .w-py { opacity: 1; min-height: calc(14px * var(--reader-scale)); }
 .sentence .en-line {
-  font-size: 14px; color: var(--muted); margin-top: 6px;
+  font-size: calc(14px * var(--reader-scale)); color: var(--muted); margin-top: 6px;
   display: none;
 }
 .show-translation .sentence .en-line { display: block; }
@@ -541,6 +526,68 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 }
 .vocab-sort select:hover { border-color: var(--accent); color: var(--accent); }
 .vocab-sort select:focus { outline: none; border-color: var(--accent); }
+
+/* ---- Add-a-word form (manual vocab entry) ---- */
+.add-word { margin: 8px 0 18px; }
+.add-word-toggle {
+  background: var(--surface); color: var(--ink);
+  border: 1px dashed var(--border);
+  padding: 10px 16px; border-radius: 10px; cursor: pointer;
+  font-size: 14px; display: inline-flex; align-items: center; gap: 8px;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.add-word-toggle:hover {
+  border-color: var(--accent); color: var(--accent);
+  background: var(--accent-soft);
+}
+.add-word-toggle .add-word-plus {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 999px;
+  background: var(--accent); color: white; font-weight: 700; font-size: 15px;
+  line-height: 1;
+}
+.add-word-form {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow);
+}
+.add-word-form.hidden, .add-word-toggle.hidden { display: none; }
+.add-word-row {
+  display: grid; gap: 10px;
+  grid-template-columns: 1fr 1fr 1fr;
+}
+@media (max-width: 600px) {
+  .add-word-row { grid-template-columns: 1fr; }
+}
+.add-word-row label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--muted); font-weight: 600;
+}
+.add-word-row input {
+  font-size: 15px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--ink);
+}
+.add-word-row input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.add-word-hint {
+  font-size: 12px; color: var(--muted); margin: 10px 0 0; min-height: 16px;
+}
+.add-word-hint.ok { color: var(--accent); }
+.add-word-hint.warn { color: #c0392b; }
+.add-word-actions {
+  display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;
+}
+.aw-save, .aw-cancel {
+  border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+  padding: 7px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  font-weight: 600;
+}
+.aw-save {
+  background: var(--accent); color: white; border-color: var(--accent);
+}
+.aw-save:hover { filter: brightness(1.05); }
+.aw-cancel:hover { border-color: var(--accent); color: var(--accent); }
 .hsk-badge {
   display: inline-block; font-size: 10px; font-weight: 700;
   color: white; padding: 2px 7px; border-radius: 999px;

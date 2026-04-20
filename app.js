@@ -55,6 +55,12 @@
     levelFilter: localStorage.getItem("inkpath_level_filter") || "all",
     rate: parseFloat(localStorage.getItem("duchinese_rate") || "0.9"),
     voiceName: localStorage.getItem("duchinese_voice") || "",
+    // Reader zoom (multiplies --reader-scale on #sentences). 0.7 – 1.8.
+    readerScale: (() => {
+      const n = parseFloat(localStorage.getItem("inkpath_reader_scale") || "1");
+      if (!isFinite(n) || n < 0.7 || n > 1.8) return 1;
+      return n;
+    })(),
     _prevRoute: null
   };
 
@@ -1087,7 +1093,6 @@
                 const started = read > 0 && !done;
                 return `
                   <div class="story-card paste-card ${done?"done":""} ${started?"in-progress":""}" data-id="${s.id}">
-                    ${renderStoryCover(s)}
                     <button class="paste-card-remove" data-id="${s.id}" title="Delete">×</button>
                     ${done ? `<span class="done-badge">✓ Read</span>` : started ? `<span class="done-badge in-progress">In progress</span>` : ""}
                     <div class="hz">${escapeHtml(s.title.hz)}</div>
@@ -1118,64 +1123,6 @@
   }
   function escapeHtml(s) {
     return String(s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c]);
-  }
-
-  // ============ STORY COVERS ============
-  // Generated inline as a CSS gradient + the first 1–2 hanzi of the title, so
-  // we don't ship image assets and covers keep working offline. Gradients are
-  // picked deterministically from a 12-slot palette via a stable hash.
-  const COVER_GRADIENTS = [
-    ["#ffecd2", "#fcb69f"], // peach
-    ["#a1c4fd", "#c2e9fb"], // sky
-    ["#d4fc79", "#96e6a1"], // spring
-    ["#fbc2eb", "#a6c1ee"], // lilac
-    ["#ffd1ff", "#fad0c4"], // blush
-    ["#c1dfc4", "#deecdd"], // sage
-    ["#f6d365", "#fda085"], // sunset
-    ["#fdcbf1", "#e6dee9"], // rose quartz
-    ["#84fab0", "#8fd3f4"], // mint
-    ["#ffb199", "#ff0844"], // coral
-    ["#c471f5", "#fa71cd"], // violet
-    ["#4facfe", "#00f2fe"]  // ocean
-  ];
-  // Topic → emoji overrides (applied by matching story title, id, or keywords).
-  const COVER_EMOJI = {
-    家: "🏠", 茶: "🍵", 饭: "🍚", 餐: "🍽", 菜: "🥬", 吃: "🍜",
-    书: "📚", 学: "📖", 老师: "👩‍🏫", 课: "📖", 图书馆: "📚", 作业: "✏️",
-    车: "🚌", 飞机: "✈️", 火车: "🚆", 旅行: "🧳", 地图: "🗺",
-    医生: "🩺", 病: "🩺", 药: "💊", 身体: "💪", 健身: "🏋️", 运动: "🏃",
-    钱: "💴", 银行: "🏦", 工作: "💼", 面试: "💼", 公司: "🏢",
-    朋友: "🧑‍🤝‍🧑", 家人: "👨‍👩‍👧", 生日: "🎂", 结婚: "💍",
-    天气: "🌤", 雨: "🌧", 雪: "❄️", 春: "🌸", 夏: "☀️", 秋: "🍂", 冬: "⛄",
-    电话: "📞", 网: "🌐", 购物: "🛒", 超市: "🛒", 电影: "🎬", 音乐: "🎵",
-    新闻: "📰", 经济: "📈",
-    梦: "✨", 信: "✉️", 城市: "🏙", 节: "🎉", 春节: "🧧", 中秋: "🌕"
-  };
-  function hashStr(s) {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-    return Math.abs(h);
-  }
-  function pickCoverEmoji(story) {
-    if (story.cover && story.cover.emoji) return story.cover.emoji;
-    const hay = (story.title && story.title.hz || "") + (story.description || "");
-    for (const k of Object.keys(COVER_EMOJI)) {
-      if (hay.includes(k)) return COVER_EMOJI[k];
-    }
-    return "";
-  }
-  function renderStoryCover(story) {
-    const [a, b] = COVER_GRADIENTS[hashStr(story.id) % COVER_GRADIENTS.length];
-    const emoji = pickCoverEmoji(story);
-    const hz = (story.title && story.title.hz) || "";
-    // Take up to the first 2 hanzi for the big glyph
-    const bigChars = [...hz].filter(c => /[\u4e00-\u9fff]/.test(c)).slice(0, 2).join("");
-    return `
-      <div class="story-cover" style="background:linear-gradient(135deg, ${a}, ${b})">
-        <span class="cover-hz">${escapeHtml(bigChars || hz.slice(0, 2))}</span>
-        ${emoji ? `<span class="cover-emoji" aria-hidden="true">${emoji}</span>` : ""}
-      </div>
-    `;
   }
 
   function pickResumeStory() {
@@ -1279,7 +1226,6 @@
                 : "Not started";
             return `
               <div class="story-card ${done ? "done" : ""} ${started && !done ? "in-progress" : ""}" data-id="${s.id}">
-                ${renderStoryCover(s)}
                 ${done ? `<span class="done-badge">✓ Read</span>` : started ? `<span class="done-badge in-progress">In progress</span>` : ""}
                 <div class="hz">${s.title.hz}</div>
                 <div class="py">${s.title.py}</div>
@@ -1347,8 +1293,14 @@
           <input type="range" id="rate-slider" min="0.5" max="1.2" step="0.05" value="${state.rate}"/>
           <span id="rate-val">${state.rate.toFixed(2)}×</span>
         </label>
+        <div class="zoom-picker" title="Text size">
+          <button class="zoom-btn" id="zoom-out" aria-label="Smaller text">A−</button>
+          <input type="range" id="zoom-slider" min="0.7" max="1.8" step="0.05" value="${state.readerScale}"/>
+          <button class="zoom-btn" id="zoom-in" aria-label="Larger text">A+</button>
+          <span id="zoom-val">${Math.round(state.readerScale * 100)}%</span>
+        </div>
       </div>
-      <div id="sentences" class="${state.showPinyin?"show-pinyin":""} ${state.showTranslation?"show-translation":""}">
+      <div id="sentences" style="--reader-scale:${state.readerScale}" class="${state.showPinyin?"show-pinyin":""} ${state.showTranslation?"show-translation":""}">
         ${story.sentences.map((s, i) => {
           const sentHz = s.words.map(w => w.hz).join("");
           const patterns = detectPatterns(sentHz);
@@ -1434,6 +1386,25 @@
       rateVal.textContent = state.rate.toFixed(2) + "×";
       localStorage.setItem("duchinese_rate", String(state.rate));
     };
+
+    // Zoom: adjusts a CSS custom property on #sentences so all reader text
+    // (hanzi, pinyin, English) scales in lockstep. Persisted per-device.
+    const zoomSlider = document.getElementById("zoom-slider");
+    const zoomVal = document.getElementById("zoom-val");
+    const zoomIn = document.getElementById("zoom-in");
+    const zoomOut = document.getElementById("zoom-out");
+    const sentencesEl = document.getElementById("sentences");
+    function applyZoom(v) {
+      const clamped = Math.max(0.7, Math.min(1.8, Math.round(v * 20) / 20));
+      state.readerScale = clamped;
+      if (sentencesEl) sentencesEl.style.setProperty("--reader-scale", String(clamped));
+      if (zoomSlider) zoomSlider.value = String(clamped);
+      if (zoomVal) zoomVal.textContent = Math.round(clamped * 100) + "%";
+      localStorage.setItem("inkpath_reader_scale", String(clamped));
+    }
+    if (zoomSlider) zoomSlider.oninput = e => applyZoom(parseFloat(e.target.value));
+    if (zoomIn)  zoomIn.onclick  = () => applyZoom(state.readerScale + 0.1);
+    if (zoomOut) zoomOut.onclick = () => applyZoom(state.readerScale - 0.1);
 
     view.querySelectorAll(".word").forEach(el => {
       el.addEventListener("click", (e) => {
@@ -1857,9 +1828,12 @@
     if (state.vocab.length === 0) {
       view.innerHTML = `
         <div class="hero"><h1>My Vocabulary</h1></div>
+        ${renderAddWordForm()}
         <div class="empty-state">
-          No saved words yet. Open a story and tap any word to save it here.
+          No saved words yet. Open a story and tap any word to save it here,
+          or add a new word above.
         </div>`;
+      bindAddWordForm();
       return;
     }
 
@@ -1910,6 +1884,7 @@
 
     view.innerHTML = `
       <div class="hero"><h1>My Vocabulary</h1><p>${state.vocab.length} saved words</p></div>
+      ${renderAddWordForm()}
       <div class="vocab-filters">
         ${pill("all", "All")}
         ${[1,2,3,4,5,6].map(l => pill(l, "HSK " + l)).join("")}
@@ -1968,6 +1943,113 @@
       el.style.cursor = "pointer";
       el.onclick = () => speak(el.textContent);
     });
+    bindAddWordForm();
+  }
+
+  // ============ ADD-WORD (manual vocabulary entry) ============
+  // Lets users add words they encountered outside the app (e.g. a textbook, a
+  // conversation). Pinyin / English / HSK auto-fill from the bundled dictionary
+  // when the hanzi is known; all fields remain editable.
+  function renderAddWordForm() {
+    return `
+      <div class="add-word">
+        <button class="add-word-toggle" id="add-word-toggle">
+          <span class="add-word-plus">+</span> Add a word
+        </button>
+        <form class="add-word-form hidden" id="add-word-form" autocomplete="off">
+          <div class="add-word-row">
+            <label>
+              <span>Chinese *</span>
+              <input type="text" id="aw-hz" placeholder="学习" required />
+            </label>
+            <label>
+              <span>Pinyin</span>
+              <input type="text" id="aw-py" placeholder="auto-filled if known" />
+            </label>
+            <label>
+              <span>English</span>
+              <input type="text" id="aw-en" placeholder="auto-filled if known" />
+            </label>
+          </div>
+          <div class="add-word-hint" id="aw-hint"></div>
+          <div class="add-word-actions">
+            <button type="submit" class="aw-save">Save word</button>
+            <button type="button" class="aw-cancel" id="aw-cancel">Cancel</button>
+          </div>
+        </form>
+      </div>
+    `;
+  }
+  function bindAddWordForm() {
+    const toggle = document.getElementById("add-word-toggle");
+    const form = document.getElementById("add-word-form");
+    const cancel = document.getElementById("aw-cancel");
+    const hzEl = document.getElementById("aw-hz");
+    const pyEl = document.getElementById("aw-py");
+    const enEl = document.getElementById("aw-en");
+    const hint = document.getElementById("aw-hint");
+    if (!toggle || !form) return;
+
+    toggle.onclick = () => {
+      form.classList.remove("hidden");
+      toggle.classList.add("hidden");
+      hzEl.focus();
+    };
+    cancel.onclick = () => {
+      form.classList.add("hidden");
+      toggle.classList.remove("hidden");
+      form.reset();
+      if (hint) hint.textContent = "";
+    };
+
+    // Live dictionary lookup as the user types the hanzi — fills empty fields
+    // with a muted preview, flags duplicates.
+    let lastHz = "";
+    hzEl.oninput = () => {
+      const hz = stripPunct((hzEl.value || "").trim());
+      if (hz === lastHz) return;
+      lastHz = hz;
+      if (!hz) { hint.textContent = ""; return; }
+      if (state.vocab.some(v => v.hz === hz)) {
+        hint.textContent = "Already in your vocabulary.";
+        hint.className = "add-word-hint warn";
+        return;
+      }
+      const d = dictLookup(hz);
+      if (d) {
+        if (!pyEl.value) pyEl.placeholder = d.py || "";
+        if (!enEl.value) enEl.placeholder = d.en || "";
+        hint.textContent = (d.hsk ? "HSK " + d.hsk + " · " : "") + (d.py || "") + (d.en ? " · " + d.en : "");
+        hint.className = "add-word-hint ok";
+      } else {
+        hint.textContent = "Not in the bundled dictionary — you can still add it.";
+        hint.className = "add-word-hint";
+      }
+    };
+
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      const hz = stripPunct((hzEl.value || "").trim());
+      if (!hz) return;
+      if (state.vocab.some(v => v.hz === hz)) {
+        hint.textContent = "Already in your vocabulary.";
+        hint.className = "add-word-hint warn";
+        return;
+      }
+      const d = dictLookup(hz) || {};
+      const entry = {
+        hz,
+        py: (pyEl.value || "").trim() || d.py || "",
+        en: (enEl.value || "").trim() || d.en || "",
+        hsk: d.hsk || null,
+        savedAt: Date.now(),
+        manual: true
+      };
+      state.vocab.push(entry);
+      saveVocab();
+      bumpDaily("saved");
+      render();
+    };
   }
 
   // ============ POPUP ============
