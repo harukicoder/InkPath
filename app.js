@@ -2147,9 +2147,9 @@
     if (activeRec) { try { activeRec.abort(); } catch (_) {} activeRec = null; }
     shadowState.active = true;
     shadowState.story = story;
-    // Start at the last-read sentence if we have progress, else at 0.
-    const prog = state.progress[story.id];
-    shadowState.i = prog && prog.lastSentence ? Math.min(prog.lastSentence, story.sentences.length - 1) : 0;
+    // Shadowing is a practice pass, not a reading resume — always start from
+    // the first sentence so already-finished stories don't immediately end.
+    shadowState.i = 0;
     setShadowButtonLabel();
     shadowNext();
   }
