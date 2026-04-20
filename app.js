@@ -1877,10 +1877,26 @@
     // Group by HSK level for filter pills.
     const filter = state.vocabFilter || "all";
     const filtered = filter === "all"
-      ? state.vocab
+      ? state.vocab.slice()
       : filter === "other"
         ? state.vocab.filter(w => !w.hsk)
         : state.vocab.filter(w => w.hsk === +filter);
+
+    // Sort. Default to newest-first so recently saved words surface first.
+    const sort = state.vocabSort || "newest";
+    const ts = (w) => w.savedAt || 0;
+    // For HSK sorts, unknown-level words sort to the end regardless of direction.
+    const hskKey = (w) => (w.hsk ? w.hsk : 99);
+    if (sort === "newest")       filtered.sort((a, b) => ts(b) - ts(a));
+    else if (sort === "oldest")  filtered.sort((a, b) => ts(a) - ts(b));
+    else if (sort === "easiest") filtered.sort((a, b) => hskKey(a) - hskKey(b) || ts(b) - ts(a));
+    else if (sort === "hardest") filtered.sort((a, b) => {
+      const ha = hskKey(a), hb = hskKey(b);
+      // Keep unknowns (99) at the bottom in both directions.
+      if (ha === 99 && hb !== 99) return 1;
+      if (hb === 99 && ha !== 99) return -1;
+      return hb - ha || ts(b) - ts(a);
+    });
 
     const counts = { all: state.vocab.length, other: 0 };
     for (let l = 1; l <= 6; l++) counts[l] = 0;
@@ -1898,6 +1914,15 @@
         ${pill("all", "All")}
         ${[1,2,3,4,5,6].map(l => pill(l, "HSK " + l)).join("")}
         ${pill("other", "Other")}
+      </div>
+      <div class="vocab-sort">
+        <label for="vocab-sort-select">Sort</label>
+        <select id="vocab-sort-select">
+          <option value="newest"  ${sort === "newest"  ? "selected" : ""}>Newest first</option>
+          <option value="oldest"  ${sort === "oldest"  ? "selected" : ""}>Oldest first</option>
+          <option value="easiest" ${sort === "easiest" ? "selected" : ""}>Easiest first (HSK 1 → 6)</option>
+          <option value="hardest" ${sort === "hardest" ? "selected" : ""}>Hardest first (HSK 6 → 1)</option>
+        </select>
       </div>
       <div class="vocab-list">
         ${filtered.map((w) => {
@@ -1927,6 +1952,11 @@
         render();
       };
     });
+    const sortSel = view.querySelector("#vocab-sort-select");
+    if (sortSel) sortSel.onchange = () => {
+      state.vocabSort = sortSel.value;
+      render();
+    };
     view.querySelectorAll(".vocab-item .remove").forEach(b => {
       b.onclick = () => {
         state.vocab.splice(+b.dataset.idx, 1);
