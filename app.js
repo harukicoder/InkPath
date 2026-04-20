@@ -51,9 +51,58 @@
     vocab: loadVocab(),
     progress: loadProgress(),
     daily: loadDaily(),
+    sessions: loadSessions(),     // [{startedAt, endedAt, chars, sentences, storyId, storyTitle}]
     rate: parseFloat(localStorage.getItem("duchinese_rate") || "0.9"),
-    voiceName: localStorage.getItem("duchinese_voice") || ""
+    voiceName: localStorage.getItem("duchinese_voice") || "",
+    _prevRoute: null
   };
+
+  // ============ READING SESSIONS ============
+  // Each reader visit becomes a session. We track chars read via markRead()
+  // and close the session on navigation away / tab unload.
+  function loadSessions() {
+    try { return JSON.parse(localStorage.getItem("inkpath_sessions") || "[]"); }
+    catch { return []; }
+  }
+  function saveSessions() {
+    // Cap unbounded growth — keep the last 500 sessions.
+    if (state.sessions.length > 500) state.sessions = state.sessions.slice(-500);
+    localStorage.setItem("inkpath_sessions", JSON.stringify(state.sessions));
+    cloudPushSessions();
+  }
+  let activeSession = null;
+  function beginSession(story) {
+    endSession();
+    if (!story) return;
+    activeSession = {
+      startedAt: Date.now(),
+      endedAt: null,
+      chars: 0,
+      sentences: 0,
+      storyId: story.id,
+      storyTitle: (story.title && story.title.hz) || "Untitled"
+    };
+  }
+  function recordReadChars(n) {
+    if (!activeSession) return;
+    activeSession.chars += Math.max(0, n | 0);
+    activeSession.sentences += 1;
+  }
+  function endSession() {
+    if (!activeSession) return;
+    const s = activeSession;
+    activeSession = null;
+    s.endedAt = Date.now();
+    const dur = s.endedAt - s.startedAt;
+    // Discard no-op sessions (user opened the page and left).
+    if (s.chars <= 0 || dur < 5000) return;
+    state.sessions.push(s);
+    saveSessions();
+  }
+  window.addEventListener("beforeunload", endSession);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") endSession();
+  });
 
   function loadDaily() {
     try { return JSON.parse(localStorage.getItem("inkpath_daily") || "{}"); }
@@ -229,6 +278,45 @@
       .join("\n")
       .trim();
     return { title, body };
+  }
+
+  // ============ OCR ============
+  // Lazy-loads Tesseract.js from CDN and runs chi_sim + chi_tra. The language
+  // data is downloaded from tessdata.projectnaptha.com on first use (~15 MB
+  // total, cached by the browser thereafter).
+  let _tessLoader = null;
+  function ensureTesseract() {
+    if (window.Tesseract) return Promise.resolve(window.Tesseract);
+    if (_tessLoader) return _tessLoader;
+    _tessLoader = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+      s.onload = () => resolve(window.Tesseract);
+      s.onerror = () => { _tessLoader = null; reject(new Error("Failed to load Tesseract.js")); };
+      document.head.appendChild(s);
+    });
+    return _tessLoader;
+  }
+  async function ocrImage(file, onProgress) {
+    const Tesseract = await ensureTesseract();
+    const { data } = await Tesseract.recognize(file, "chi_sim+chi_tra", {
+      logger: (m) => {
+        if (onProgress && m && typeof m.progress === "number") {
+          onProgress(m.status || "", m.progress);
+        }
+      }
+    });
+    const raw = (data && data.text) || "";
+    // Tesseract inserts spaces between Chinese chars — strip them but keep
+    // line breaks and punctuation.
+    return raw
+      .split(/\r?\n/)
+      .map(line => line
+        .replace(/([\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])/g, "$1")
+        .replace(/\s{2,}/g, " ")
+        .trim())
+      .filter(Boolean)
+      .join("\n");
   }
 
   function storyNeedsTranslation(story) {
@@ -426,7 +514,8 @@
     localStorage.setItem("inkpath_progress", JSON.stringify(state.progress));
     cloudPushProgress();
   }
-  function markRead(storyId, sentenceIndex, total) {
+  function markRead(storyId, sentenceIndex, total, chars) {
+    recordReadChars(chars || 0);
     // Don't record paste-story progress — it's ephemeral.
     if (storyId === "__paste__") { bumpDaily("read"); return; }
     const prev = state.progress[storyId] || {};
@@ -438,6 +527,15 @@
     state.progress[storyId] = next;
     saveProgress();
     bumpDaily("read");
+  }
+  function countSentenceChars(sentence) {
+    if (!sentence || !sentence.words) return 0;
+    // CJK chars only — ASCII tokens / punctuation don't count toward reading.
+    let n = 0;
+    for (const w of sentence.words) {
+      for (const ch of (w.hz || "")) if (/[\u4e00-\u9fff]/.test(ch)) n++;
+    }
+    return n;
   }
 
   // Unified dictionary lookup: flashcards HSK data wins for examples/HSK,
@@ -580,6 +678,18 @@
     }, 800);
   }
 
+  let cloudSessionsTimer = null;
+  function cloudPushSessions() {
+    if (!hasFirebase || !currentUser) return;
+    clearTimeout(cloudSessionsTimer);
+    cloudSessionsTimer = setTimeout(() => {
+      firebase.firestore().collection("users").doc(currentUser.uid).set({
+        inkpathSessions: state.sessions,
+        inkpathSessionsUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }).catch(() => {});
+    }, 1200);
+  }
+
   let cloudDailyTimer = null;
   function cloudPushDaily() {
     if (!hasFirebase || !currentUser) return;
@@ -644,10 +754,19 @@
         state.pasteLibrary = [...pasteMap.values()];
         localStorage.setItem("inkpath_paste_library", JSON.stringify(state.pasteLibrary));
 
+        // Merge reading sessions: union by startedAt, cap to last 500.
+        const cloudSessions = Array.isArray(data.inkpathSessions) ? data.inkpathSessions : [];
+        const sessMap = new Map();
+        for (const s of cloudSessions) if (s && s.startedAt) sessMap.set(s.startedAt, s);
+        for (const s of state.sessions || []) if (s && s.startedAt) sessMap.set(s.startedAt, s);
+        state.sessions = [...sessMap.values()].sort((a, b) => a.startedAt - b.startedAt).slice(-500);
+        localStorage.setItem("inkpath_sessions", JSON.stringify(state.sessions));
+
         setAuthStatus("Synced");
         if (changed) cloudPushVocab();
         cloudPushProgress();
         cloudPushDaily();
+        cloudPushSessions();
         cloudPushPasteLibrary();
         render();
       })
@@ -862,6 +981,12 @@
   // ============ RENDER ============
   function render() {
     hidePopup();
+    // Close an open session if we're leaving the reader.
+    if (state._prevRoute === "reader" && state.route !== "reader") {
+      stopShadowing();
+      endSession();
+    }
+    state._prevRoute = state.route;
     updateStreakUI();
     if (state.route === "library") renderLibrary();
     else if (state.route === "reader") renderReader();
@@ -1048,6 +1173,9 @@
          || (state.pasteLibrary || []).find(s => s.id === state.storyId));
     if (!story) { state.route = "library"; return render(); }
 
+    // Start a fresh reading session for this story (closes any prior one).
+    if (!activeSession || activeSession.storyId !== story.id) beginSession(story);
+
     const savedSet = new Set(state.vocab.map(v => v.hz));
     const knownSet = getKnownSet();
     const cov = storyCoverage(story);
@@ -1078,6 +1206,7 @@
         <label class="toggle"><input type="checkbox" id="tg-py" ${state.showPinyin?"checked":""}/> Pinyin</label>
         <label class="toggle"><input type="checkbox" id="tg-en" ${state.showTranslation?"checked":""}/> Translation</label>
         <button class="ctrl-btn" id="play-all">▶ Play all</button>
+        ${SR_AVAILABLE ? `<button class="ctrl-btn secondary" id="shadow-all" title="Listen, then repeat each sentence after the voice">🎯 Shadow</button>` : ""}
         <button class="ctrl-btn secondary" id="stop">■ Stop</button>
         <span class="spacer"></span>
         <label class="voice-picker">Voice
@@ -1146,7 +1275,15 @@
       }
     };
     document.getElementById("play-all").onclick = () => playAll(story);
-    document.getElementById("stop").onclick = () => speechSynthesis.cancel();
+    const shadowBtn = document.getElementById("shadow-all");
+    if (shadowBtn) shadowBtn.onclick = () => {
+      if (shadowState.active) stopShadowing();
+      else startShadowing(story);
+    };
+    document.getElementById("stop").onclick = () => {
+      speechSynthesis.cancel();
+      stopShadowing();
+    };
 
     const voiceSel = document.getElementById("voice-select");
     voiceSel.onchange = e => {
@@ -1194,7 +1331,7 @@
       el.addEventListener("click", () => {
         const i = +el.dataset.i;
         playSentence(story.sentences[i], i);
-        markRead(story.id, i, story.sentences.length);
+        markRead(story.id, i, story.sentences.length, countSentenceChars(story.sentences[i]));
       });
     });
 
@@ -1221,9 +1358,12 @@
         <div class="paste-actions">
           <button id="paste-go" class="ctrl-btn">Segment &amp; read →</button>
           ${state.customStory ? `<button id="paste-reopen" class="ctrl-btn secondary">Reopen last</button>` : ""}
+          <button id="paste-ocr" class="ctrl-btn secondary" title="Extract Chinese from an image">📷 Scan image</button>
           <button id="paste-clear" class="ctrl-btn secondary">Clear</button>
           <span class="paste-hint">Tip: any unrecognized word falls back to single-character lookup.</span>
         </div>
+        <input type="file" id="paste-ocr-file" accept="image/*" hidden>
+        <div id="paste-drop" class="paste-drop" hidden>Drop an image here to scan it</div>
         <div id="paste-status" class="paste-status hidden"></div>
       </div>
     `;
@@ -1308,6 +1448,74 @@
       saveCustomStory();
       render();
     };
+
+    // ---- OCR: image → text ----
+    const ocrBtn = document.getElementById("paste-ocr");
+    const ocrFile = document.getElementById("paste-ocr-file");
+    const dropEl = document.getElementById("paste-drop");
+    async function runOcr(file) {
+      if (!file || !file.type || !file.type.startsWith("image/")) {
+        setStatus("That doesn't look like an image file.", "error");
+        return;
+      }
+      goBtn.disabled = true;
+      ocrBtn.disabled = true;
+      setStatus("Preparing OCR engine (first run downloads ~15 MB)…", "loading");
+      try {
+        const text = await ocrImage(file, (status, progress) => {
+          const pct = Math.round((progress || 0) * 100);
+          const label = status === "recognizing text" ? "Reading image" : (status || "Working");
+          setStatus(label + "… " + pct + "%", "loading");
+        });
+        if (!text || !HAS_CJK.test(text)) {
+          setStatus("No Chinese text detected in that image.", "error");
+          return;
+        }
+        input.value = text;
+        reflectInputMode();
+        setStatus("Got " + [...text].filter(c => /[\u4e00-\u9fff]/.test(c)).length + " Chinese characters. Review and hit “Segment & read”.", "ok");
+      } catch (err) {
+        console.warn("[InkPath] OCR failed:", err);
+        setStatus("OCR failed — check your connection or try a clearer image.", "error");
+      } finally {
+        goBtn.disabled = false;
+        ocrBtn.disabled = false;
+      }
+    }
+    if (ocrBtn) ocrBtn.onclick = () => ocrFile && ocrFile.click();
+    if (ocrFile) ocrFile.onchange = (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) runOcr(f);
+      e.target.value = "";
+    };
+    // Drag-and-drop onto the paste textarea.
+    function showDrop(show) { if (dropEl) dropEl.hidden = !show; }
+    ["dragenter", "dragover"].forEach(evt =>
+      input.addEventListener(evt, (e) => {
+        if (e.dataTransfer && [...e.dataTransfer.items].some(i => i.kind === "file")) {
+          e.preventDefault();
+          showDrop(true);
+        }
+      })
+    );
+    ["dragleave", "drop"].forEach(evt =>
+      input.addEventListener(evt, () => showDrop(false))
+    );
+    input.addEventListener("drop", (e) => {
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f && f.type && f.type.startsWith("image/")) { e.preventDefault(); runOcr(f); }
+    });
+    // Image pasted directly from clipboard.
+    input.addEventListener("paste", (e) => {
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (const it of items) {
+        if (it.kind === "file" && it.type && it.type.startsWith("image/")) {
+          const f = it.getAsFile();
+          if (f) { e.preventDefault(); runOcr(f); return; }
+        }
+      }
+    });
   }
 
   function openSavePasteDialog(story) {
@@ -1433,6 +1641,84 @@
       </div>
       <div class="hsk-grid">${rows}</div>
       ${learned.other ? `<p class="hsk-other-note">Plus ${learned.other} word${learned.other===1?"":"s"} outside HSK 1–6.</p>` : ""}
+      ${renderSessionStats()}
+    `;
+  }
+
+  // ---- Reading-speed + history card on the HSK page ----
+  function renderSessionStats() {
+    const ss = state.sessions || [];
+    if (!ss.length) {
+      return `
+        <section class="session-stats empty">
+          <h2>Reading speed</h2>
+          <p>Read a few sentences and your session history will show up here — characters per minute, total time, and a 14-day sparkline.</p>
+        </section>`;
+    }
+    const totalChars = ss.reduce((a, s) => a + (s.chars || 0), 0);
+    const totalMs = ss.reduce((a, s) => a + Math.max(0, (s.endedAt || 0) - (s.startedAt || 0)), 0);
+    const totalMin = totalMs / 60000;
+    const cpm = totalMin > 0 ? Math.round(totalChars / totalMin) : 0;
+
+    // Last 14 days, char totals per day.
+    const days = [];
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    for (let k = 13; k >= 0; k--) {
+      const d = new Date(today); d.setDate(today.getDate() - k);
+      const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+      days.push({ key, date: d, chars: 0, ms: 0 });
+    }
+    for (const s of ss) {
+      const d = new Date(s.startedAt);
+      const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+      const slot = days.find(x => x.key === key);
+      if (slot) {
+        slot.chars += s.chars || 0;
+        slot.ms += Math.max(0, (s.endedAt || 0) - (s.startedAt || 0));
+      }
+    }
+    const maxChars = Math.max(1, ...days.map(d => d.chars));
+    const bars = days.map(d => {
+      const h = d.chars ? Math.max(6, Math.round((d.chars / maxChars) * 44)) : 2;
+      const cls = d.chars ? "bar has" : "bar";
+      const label = d.date.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " · " + d.chars + " chars";
+      return `<span class="${cls}" style="height:${h}px" title="${label}"></span>`;
+    }).join("");
+
+    // Recent sessions list (last 6, most recent first).
+    const recent = ss.slice(-6).reverse();
+    const rowsHtml = recent.map(s => {
+      const when = new Date(s.startedAt);
+      const dur = Math.max(1, Math.round(((s.endedAt || 0) - s.startedAt) / 60000));
+      const spd = dur > 0 ? Math.round(s.chars / (((s.endedAt || 0) - s.startedAt) / 60000)) : 0;
+      const whenLabel = when.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
+        " · " + when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      const title = (s.storyTitle || "Untitled").replace(/</g, "&lt;");
+      return `
+        <li class="sess-row">
+          <span class="sess-when">${whenLabel}</span>
+          <span class="sess-title">${title}</span>
+          <span class="sess-metric">${s.chars} chars · ${dur}m · ${spd} cpm</span>
+        </li>`;
+    }).join("");
+
+    return `
+      <section class="session-stats">
+        <h2>Reading speed</h2>
+        <div class="sess-metrics">
+          <div class="sess-card"><span class="num">${cpm}</span><span class="lbl">chars/min</span></div>
+          <div class="sess-card"><span class="num">${totalChars.toLocaleString()}</span><span class="lbl">total chars</span></div>
+          <div class="sess-card"><span class="num">${Math.round(totalMin)}</span><span class="lbl">total minutes</span></div>
+          <div class="sess-card"><span class="num">${ss.length}</span><span class="lbl">sessions</span></div>
+        </div>
+        <div class="sess-spark" aria-label="Last 14 days of reading">${bars}</div>
+        <div class="sess-spark-labels">
+          <span>${days[0].date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+          <span>today</span>
+        </div>
+        <h3>Recent sessions</h3>
+        <ul class="sess-list">${rowsHtml}</ul>
+      </section>
     `;
   }
 
@@ -1835,6 +2121,141 @@
     if (score >= 65) bumpDaily("read");
   }
 
+  // ============ SHADOWING MODE ============
+  // Sequence over each sentence: speak → short gap → listen → score →
+  // brief pause → advance. Stop is non-fatal at any point.
+  const shadowState = { active: false, story: null, i: 0, timer: null, rec: null };
+  function setShadowButtonLabel() {
+    const btn = document.getElementById("shadow-all");
+    if (!btn) return;
+    btn.textContent = shadowState.active ? "■ Stop shadow" : "🎯 Shadow";
+  }
+  function stopShadowing() {
+    if (!shadowState.active && !shadowState.rec && !shadowState.timer) return;
+    shadowState.active = false;
+    if (shadowState.timer) { clearTimeout(shadowState.timer); shadowState.timer = null; }
+    if (shadowState.rec) { try { shadowState.rec.abort(); } catch (_) {} shadowState.rec = null; }
+    try { speechSynthesis.cancel(); } catch (_) {}
+    // Clear any in-progress listening UI from the shadow flow (don't touch
+    // one-off per-sentence mic panels).
+    document.querySelectorAll(".pronun-check.shadow.listening").forEach(p => p.remove());
+    setShadowButtonLabel();
+  }
+  function startShadowing(story) {
+    if (!SR_AVAILABLE || !story || !story.sentences || !story.sentences.length) return;
+    // Abort any existing per-sentence recognizer too.
+    if (activeRec) { try { activeRec.abort(); } catch (_) {} activeRec = null; }
+    shadowState.active = true;
+    shadowState.story = story;
+    // Start at the last-read sentence if we have progress, else at 0.
+    const prog = state.progress[story.id];
+    shadowState.i = prog && prog.lastSentence ? Math.min(prog.lastSentence, story.sentences.length - 1) : 0;
+    setShadowButtonLabel();
+    shadowNext();
+  }
+  function shadowNext() {
+    if (!shadowState.active) return;
+    const { story, i } = shadowState;
+    if (i >= story.sentences.length) { stopShadowing(); return; }
+    const sentence = story.sentences[i];
+    const sentenceEl = view.querySelector(`.sentence[data-i="${i}"]`);
+    if (!sentenceEl) { stopShadowing(); return; }
+
+    view.querySelectorAll(".sentence").forEach(el => el.classList.remove("active"));
+    sentenceEl.classList.add("active");
+    sentenceEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Remove any prior pronun panel.
+    const prev = sentenceEl.querySelector(".pronun-check");
+    if (prev) prev.remove();
+    markRead(story.id, i, story.sentences.length, countSentenceChars(sentence));
+
+    const text = sentence.words.map(w => w.hz).join("");
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "zh-CN";
+    u.rate = state.rate;
+    u.pitch = 1;
+    if (chosenVoice) u.voice = chosenVoice;
+    u.onend = () => {
+      if (!shadowState.active) return;
+      shadowState.timer = setTimeout(() => shadowListen(sentenceEl, sentence), 350);
+    };
+    try { speechSynthesis.cancel(); speechSynthesis.speak(u); }
+    catch (_) { stopShadowing(); }
+  }
+  function shadowListen(sentenceEl, sentence) {
+    if (!shadowState.active) return;
+    const expected = sentence.words.map(w => w.hz).join("");
+    const expectedClean = stripForPronun(expected);
+
+    const panel = document.createElement("div");
+    panel.className = "pronun-check listening shadow";
+    panel.innerHTML = `
+      <div class="pronun-row">
+        <span class="pronun-status"><span class="pronun-dot"></span>Your turn — repeat the sentence</span>
+        <button class="pronun-skip" type="button">Skip</button>
+      </div>
+      <div class="pronun-interim"></div>
+    `;
+    sentenceEl.appendChild(panel);
+    panel.addEventListener("click", (e) => e.stopPropagation());
+    panel.querySelector(".pronun-skip").onclick = (e) => {
+      e.stopPropagation();
+      if (shadowState.rec) { try { shadowState.rec.abort(); } catch (_) {} }
+      panel.remove();
+      shadowState.i += 1;
+      shadowState.timer = setTimeout(shadowNext, 200);
+    };
+
+    const rec = new SR_CTOR();
+    rec.lang = "zh-CN";
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    rec.continuous = false;
+    shadowState.rec = rec;
+
+    let finalT = "", interim = "";
+    rec.onresult = (ev) => {
+      finalT = ""; interim = "";
+      for (let i = 0; i < ev.results.length; i++) {
+        const r = ev.results[i];
+        if (r.isFinal) finalT += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      const el = panel.querySelector(".pronun-interim");
+      if (el) el.textContent = interim || finalT || "";
+    };
+    rec.onerror = () => {
+      shadowState.rec = null;
+      if (!shadowState.active) return;
+      panel.remove();
+      shadowState.i += 1;
+      shadowState.timer = setTimeout(shadowNext, 400);
+    };
+    rec.onend = () => {
+      shadowState.rec = null;
+      if (!shadowState.active) return;
+      const heard = (finalT || interim || "").trim();
+      if (!heard) {
+        panel.remove();
+        shadowState.i += 1;
+        shadowState.timer = setTimeout(shadowNext, 400);
+        return;
+      }
+      renderPronunResult(panel, sentenceEl, sentence, expected, expectedClean, heard);
+      // Advance after a brief pause so the user can read their score.
+      shadowState.timer = setTimeout(() => {
+        if (!shadowState.active) return;
+        shadowState.i += 1;
+        shadowNext();
+      }, 1800);
+    };
+    try { rec.start(); }
+    catch (err) {
+      try { rec.abort(); } catch (_) {}
+      shadowState.timer = setTimeout(() => { if (shadowState.active) shadowListen(sentenceEl, sentence); }, 200);
+    }
+  }
+
   function playSentence(sentence, i) {
     view.querySelectorAll(".sentence").forEach(el => el.classList.remove("active"));
     const el = view.querySelector(`.sentence[data-i="${i}"]`);
@@ -1854,7 +2275,7 @@
       view.querySelectorAll(".sentence").forEach(el => el.classList.remove("active"));
       const el = view.querySelector(`.sentence[data-i="${i}"]`);
       if (el) { el.classList.add("active"); el.scrollIntoView({ behavior:"smooth", block:"center" }); }
-      markRead(story.id, i, story.sentences.length);
+      markRead(story.id, i, story.sentences.length, countSentenceChars(s));
       const u = new SpeechSynthesisUtterance(s.words.map(w => w.hz).join(""));
       u.lang = "zh-CN";
       u.rate = state.rate;

@@ -547,6 +547,109 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
 }
 .source-link:hover { color: var(--accent); border-color: var(--accent); }
 
+/* ---- OCR drop zone ---- */
+.paste-drop {
+  margin-top: 10px;
+  padding: 22px;
+  border-radius: 12px;
+  border: 2px dashed var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+  text-align: center;
+  font-size: 14px;
+}
+
+/* ---- Shadow panel: subtle distinction from the plain pronun panel ---- */
+.pronun-check.shadow { border-left: 3px solid var(--accent); }
+.pronun-check.shadow .pronun-skip {
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--border); padding: 4px 10px;
+  border-radius: 999px; font-size: 12px; cursor: pointer;
+}
+.pronun-check.shadow .pronun-skip:hover { color: var(--ink); border-color: var(--muted); }
+
+/* ---- Session stats (HSK dashboard) ---- */
+.session-stats {
+  max-width: 720px; margin: 24px auto 40px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.session-stats h2 {
+  margin: 0 0 12px; font-size: 18px;
+}
+.session-stats h3 {
+  margin: 20px 0 8px; font-size: 14px;
+  color: var(--muted); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.session-stats.empty p { color: var(--muted); margin: 0; }
+.sess-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.sess-card {
+  display: flex; flex-direction: column;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+}
+.sess-card .num {
+  font-size: 22px; font-weight: 700; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.sess-card .lbl {
+  font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.sess-spark {
+  display: flex; align-items: flex-end;
+  gap: 4px; height: 52px;
+  padding: 6px 2px 0;
+  border-bottom: 1px solid var(--border);
+}
+.sess-spark .bar {
+  flex: 1 1 0; min-width: 4px;
+  background: var(--border);
+  border-radius: 3px 3px 0 0;
+}
+.sess-spark .bar.has { background: var(--accent); }
+.sess-spark-labels {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--muted);
+  margin-top: 4px;
+}
+.sess-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.sess-row {
+  display: grid;
+  grid-template-columns: 150px 1fr auto;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 13px;
+  align-items: center;
+}
+.sess-when { color: var(--muted); font-variant-numeric: tabular-nums; }
+.sess-title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ink);
+}
+.sess-metric { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+@media (max-width: 560px) {
+  .sess-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .sess-metric { text-align: left; }
+}
+
 /* ---- Grammar pattern chips in the reader ---- */
 .grammar-chips {
   display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px;
