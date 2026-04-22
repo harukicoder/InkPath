@@ -4,11 +4,11 @@
  * news in China, written with HSK ≤ 4 vocabulary. Invoked daily by the
  * `.github/workflows/daily-news.yml` workflow.
  *
- * Reads:  ANTHROPIC_API_KEY env var (required)
+ * Reads:  DEEPSEEK_API_KEY env var (required)
  * Writes: data/daily-news.js (overwritten in place)
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,12 +16,15 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(__dirname, "..", "data", "daily-news.js");
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error("ANTHROPIC_API_KEY is not set.");
+if (!process.env.DEEPSEEK_API_KEY) {
+  console.error("DEEPSEEK_API_KEY is not set.");
   process.exit(1);
 }
 
-const client = new Anthropic();
+const client = new OpenAI({
+  apiKey: process.env.DEEPSEEK_API_KEY,
+  baseURL: "https://api.deepseek.com"
+});
 const today = new Date().toISOString().slice(0, 10);
 
 const SCHEMA_EXAMPLE = {
@@ -56,7 +59,7 @@ JSON schema (example — your output must match this shape):
 ${JSON.stringify(SCHEMA_EXAMPLE, null, 2)}`;
 
 function extractJson(text) {
-  // Claude sometimes wraps JSON in code fences; be lenient.
+  // Sometimes wraps JSON in code fences; be lenient.
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const raw = fenced ? fenced[1] : text;
   const start = raw.indexOf("{");
@@ -81,18 +84,16 @@ function validate(brief) {
   return true;
 }
 
-const resp = await client.messages.create({
-  model: "claude-sonnet-4-5",
+const resp = await client.chat.completions.create({
+  model: "deepseek-chat",
   max_tokens: 4096,
-  system: SYSTEM,
-  messages: [{ role: "user", content: USER }]
+  messages: [
+    { role: "system", content: SYSTEM },
+    { role: "user", content: USER }
+  ]
 });
 
-const text = resp.content
-  .filter((b) => b.type === "text")
-  .map((b) => b.text)
-  .join("\n");
-
+const text = resp.choices[0].message.content;
 const brief = extractJson(text);
 brief.date = today;
 validate(brief);

@@ -18,12 +18,12 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install Anthropic SDK
-        run: npm install --no-save @anthropic-ai/sdk@^0.30.0
+      - name: Install OpenAI SDK
+        run: npm install --no-save openai@^4.0.0
 
       - name: Generate today's brief
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: node scripts/generate-daily-news.mjs
 
       - name: Commit if changed

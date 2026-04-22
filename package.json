@@ -1,0 +1,30 @@
+{
+  "name": "inkpath-webapp",
+  "version": "1.0.0",
+  "description": "Learn Mandarin through stories",
+  "main": "app.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "generate-daily-news": "node scripts/generate-daily-news.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harukicoder/InkPath.git"
+  },
+  "keywords": [
+    "mandarin",
+    "learning",
+    "chinese",
+    "stories"
+  ],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/harukicoder/InkPath/issues"
+  },
+  "homepage": "https://github.com/harukicoder/InkPath#readme",
+  "dependencies": {
+    "openai": "^4.104.0"
+  }
+}
