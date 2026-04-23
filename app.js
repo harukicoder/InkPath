@@ -2027,8 +2027,8 @@
         <form class="add-word-form hidden" id="add-word-form" autocomplete="off">
           <div class="add-word-row">
             <label>
-              <span>Chinese *</span>
-              <input type="text" id="aw-hz" placeholder="学习" required />
+              <span>Chinese</span>
+              <input type="text" id="aw-hz" placeholder="学习" />
             </label>
             <label>
               <span>Pinyin</span>
