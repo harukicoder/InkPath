@@ -583,6 +583,33 @@
     };
   }
 
+  // Reverse lookup: find hanzi matching pinyin or english keyword.
+  function reverseDictLookup(query, field) {
+    const q = (query || "").toLowerCase().trim();
+    if (!q) return null;
+    const dicts = [window.HSK_DICT, window.DICT];
+    for (const d of dicts) {
+      if (!d) continue;
+      for (const hz in d) {
+        const val = (d[hz][field] || "").toLowerCase();
+        // Exact match or matches a semicolon-separated part (common in English defs)
+        if (val === q || val.split("; ").includes(q) || val.split(";").includes(q)) {
+          return Object.assign({ hz }, d[hz]);
+        }
+      }
+    }
+    // Partial match if no exact match found above
+    for (const d of dicts) {
+      if (!d) continue;
+      for (const hz in d) {
+        if ((d[hz][field] || "").toLowerCase().includes(q)) {
+          return Object.assign({ hz }, d[hz]);
+        }
+      }
+    }
+    return null;
+  }
+
   // All words the user has seen / saved. Combines:
   //   1. Explicitly saved vocab (state.vocab)
   //   2. Every word in any fully-read story (last sentence >= total)
@@ -2068,9 +2095,25 @@
       }
     };
 
+    const tryReverseLookup = (val, field) => {
+      if (!val || val.length < 2 || hzEl.value.trim()) return;
+      const match = reverseDictLookup(val, field);
+      if (match) {
+        hzEl.placeholder = match.hz;
+        hint.textContent = `Suggested Hanzi: ${match.hz} (${match.py})`;
+        hint.className = "add-word-hint ok";
+      }
+    };
+    pyEl.oninput = () => tryReverseLookup(pyEl.value, "py");
+    enEl.oninput = () => tryReverseLookup(enEl.value, "en");
+
     form.onsubmit = (e) => {
       e.preventDefault();
-      const hz = stripPunct((hzEl.value || "").trim());
+      let hz = stripPunct((hzEl.value || "").trim());
+      // If Hanzi field is empty but we have a placeholder/match from reverse lookup
+      if (!hz && hzEl.placeholder && hzEl.placeholder !== "学习") {
+        hz = hzEl.placeholder;
+      }
       if (!hz) return;
       if (state.vocab.some(v => v.hz === hz)) {
         hint.textContent = "Already in your vocabulary.";
