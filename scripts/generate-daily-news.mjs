@@ -4,11 +4,11 @@
  * news in China, written with HSK ≤ 4 vocabulary. Invoked daily by the
  * `.github/workflows/daily-news.yml` workflow.
  *
- * Reads:  DEEPSEEK_API_KEY env var (required)
+ * Reads:  GEMINI_API_KEY env var (required)
  * Writes: data/daily-news.js (overwritten in place)
  */
 
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,15 +16,19 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(__dirname, "..", "data", "daily-news.js");
 
-if (!process.env.DEEPSEEK_API_KEY) {
-  console.error("DEEPSEEK_API_KEY is not set.");
+if (!process.env.GEMINI_API_KEY) {
+  console.error("GEMINI_API_KEY is not set.");
   process.exit(1);
 }
 
-const client = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY,
-  baseURL: "https://api.deepseek.com"
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ 
+  model: "gemini-1.5-flash",
+  generationConfig: {
+    responseMimeType: "application/json",
+  }
 });
+
 const today = new Date().toISOString().slice(0, 10);
 
 const SCHEMA_EXAMPLE = {
@@ -50,23 +54,13 @@ Hard rules:
 - Cover 2–3 real recent items about China: at least one general news item and at least one economic / business item.
 - Neutral tone. Factual. No editorializing.
 - 10–15 sentences total. Each sentence must be one complete idea with a terminal punctuation mark.
-- Return one JSON object exactly matching the provided schema. No prose before or after.
+- Return one JSON object exactly matching the provided schema.
 - Word segmentation: split each sentence into meaningful words (not single chars unless they are standalone words). Each word is an object with hz (the Chinese surface form, punctuation appended to the last word of a sentence), py (pinyin with tone marks, lowercase, words separated by spaces only within multi-syllable words), en (concise gloss).`;
 
-const USER = `Today is ${today}. Write the brief for today. Return only the JSON object.
+const USER = `Today is ${today}. Write the brief for today.
 
 JSON schema (example — your output must match this shape):
 ${JSON.stringify(SCHEMA_EXAMPLE, null, 2)}`;
-
-function extractJson(text) {
-  // Sometimes wraps JSON in code fences; be lenient.
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const raw = fenced ? fenced[1] : text;
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("No JSON object in response");
-  return JSON.parse(raw.slice(start, end + 1));
-}
 
 function validate(brief) {
   if (!brief || typeof brief !== "object") throw new Error("not an object");
@@ -84,17 +78,21 @@ function validate(brief) {
   return true;
 }
 
-const resp = await client.chat.completions.create({
-  model: "deepseek-chat",
-  max_tokens: 4096,
-  messages: [
-    { role: "system", content: SYSTEM },
-    { role: "user", content: USER }
+const result = await model.generateContent({
+  contents: [
+    { role: "user", parts: [{ text: SYSTEM + "\n\n" + USER }] }
   ]
 });
 
-const text = resp.choices[0].message.content;
-const brief = extractJson(text);
+const text = result.response.text();
+let brief;
+try {
+  brief = JSON.parse(text);
+} catch (e) {
+  console.error("Failed to parse Gemini response as JSON:", text);
+  process.exit(1);
+}
+
 brief.date = today;
 validate(brief);
 

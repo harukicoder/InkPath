@@ -61,6 +61,7 @@
       if (!isFinite(n) || n < 0.7 || n > 1.8) return 1;
       return n;
     })(),
+    vocabSearch: "",
     _prevRoute: null
   };
 
@@ -1848,13 +1849,27 @@
     }
     if (backfilled) saveVocab();
 
-    // Group by HSK level for filter pills.
+    // Group by HSK level + Search filter
     const filter = state.vocabFilter || "all";
-    const filtered = filter === "all"
-      ? state.vocab.slice()
-      : filter === "other"
-        ? state.vocab.filter(w => !w.hsk)
-        : state.vocab.filter(w => w.hsk === +filter);
+    const searchQuery = (state.vocabSearch || "").toLowerCase().trim();
+
+    let filtered = state.vocab.slice();
+
+    // Filter by HSK
+    if (filter !== "all") {
+      filtered = filter === "other"
+        ? filtered.filter(w => !w.hsk)
+        : filtered.filter(w => w.hsk === +filter);
+    }
+
+    // Filter by Search
+    if (searchQuery) {
+      filtered = filtered.filter(w =>
+        w.hz.includes(searchQuery) ||
+        (w.py && w.py.toLowerCase().includes(searchQuery)) ||
+        (w.en && w.en.toLowerCase().includes(searchQuery))
+      );
+    }
 
     // Sort. Default to newest-first so recently saved words surface first.
     const sort = state.vocabSort || "newest";
@@ -1885,6 +1900,10 @@
     view.innerHTML = `
       <div class="hero"><h1>My Vocabulary</h1><p>${state.vocab.length} saved words</p></div>
       ${renderAddWordForm()}
+      <div class="vocab-search">
+        <input type="text" id="vocab-search-input" placeholder="Search Hanzi, pinyin, or English..." value="${escapeHtml(state.vocabSearch)}">
+        ${state.vocabSearch ? `<button id="vocab-search-clear" title="Clear search">×</button>` : ""}
+      </div>
       <div class="vocab-filters">
         ${pill("all", "All")}
         ${[1,2,3,4,5,6].map(l => pill(l, "HSK " + l)).join("")}
@@ -1900,6 +1919,7 @@
         </select>
       </div>
       <div class="vocab-list">
+        ${filtered.length === 0 ? `<div class="empty-state">No matches found for "${escapeHtml(state.vocabSearch)}".</div>` : ""}
         ${filtered.map((w) => {
           const idx = state.vocab.indexOf(w);
           const ctx = w.context && w.context.hz
@@ -1920,6 +1940,27 @@
           `;
         }).join("")}
       </div>`;
+
+    const searchInput = view.querySelector("#vocab-search-input");
+    if (searchInput) {
+      searchInput.oninput = (e) => {
+        state.vocabSearch = e.target.value;
+        render();
+        // Maintain focus after re-render
+        const newInp = document.getElementById("vocab-search-input");
+        if (newInp) {
+          newInp.focus();
+          newInp.setSelectionRange(state.vocabSearch.length, state.vocabSearch.length);
+        }
+      };
+    }
+    const clearSearch = view.querySelector("#vocab-search-clear");
+    if (clearSearch) {
+      clearSearch.onclick = () => {
+        state.vocabSearch = "";
+        render();
+      };
+    }
 
     view.querySelectorAll(".vocab-filters .pill").forEach(b => {
       b.onclick = () => {
